@@ -147,6 +147,14 @@ sealed class GameAction {
         override val civName: String,
     ) : GameAction()
 
+    @Serializable
+    @SerialName("createImprovement")
+    data class CreateImprovementAction(
+        val unitId: Int,
+        val improvementName: String,
+        override val civName: String,
+    ) : GameAction()
+
     // ──────────────────────────────────────
     //  Trade / Diplomacy actions
     // ──────────────────────────────────────

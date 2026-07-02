@@ -107,6 +107,7 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
             is GameAction.AdoptPolicyAction -> applyRemoteAdoptPolicy(action)
             is GameAction.DisbandUnitAction -> applyRemoteDisbandUnit(action)
             is GameAction.FoundPantheonAction -> applyRemoteFoundPantheon(action)
+            is GameAction.CreateImprovementAction -> applyRemoteCreateImprovement(action)
             is GameAction.SendTradeRequestAction -> applyRemoteSendTradeRequest(action)
             is GameAction.RetractTradeRequestAction -> applyRemoteRetractTradeRequest(action)
             is GameAction.AcceptTradeAction -> applyRemoteAcceptTrade(action)
@@ -156,6 +157,9 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
 
     fun sendFoundPantheonAction(beliefName: String, civName: String) =
         sendGameAction(GameAction.FoundPantheonAction(beliefName, civName))
+
+    fun sendCreateImprovementAction(unitId: Int, improvementName: String, civName: String) =
+        sendGameAction(GameAction.CreateImprovementAction(unitId, improvementName, civName))
 
     fun sendPurchaseAction(
         constructionName: String, cityId: String, queuePosition: Int = -1,
@@ -410,6 +414,14 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
                 debug("Applying remote found pantheon: %s for %s",
                     action.beliefName, action.civName)
                 applyRemoteFoundPantheon(action)
+            }
+            is GameAction.CreateImprovementAction -> {
+                if (!packet.validated) {
+                    if (isHost()) hostValidateCreateImprovement(packet)
+                    return
+                }
+                debug("Applying remote create improvement: %s", action.improvementName)
+                applyRemoteCreateImprovement(action)
             }
             is GameAction.SendTradeRequestAction -> {
                 if (!packet.validated) {
@@ -1038,6 +1050,39 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
         val belief = worldScreen.gameInfo.ruleset.beliefs[action.beliefName] ?: return
         if (civ.religionManager.religionState >= ReligionState.Pantheon) return
         civ.religionManager.chooseBeliefs(listOf(belief), useFreeBeliefs = true)
+        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
+    }
+
+    // ──────────────────────────────────────
+    //  Create Improvement (work boat, instant)
+    // ──────────────────────────────────────
+
+    private fun hostValidateCreateImprovement(envelope: GameActionPacket) {
+        val action = envelope.action as? GameAction.CreateImprovementAction ?: return
+        val unit = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName }
+            ?.units?.getUnitById(action.unitId) ?: return
+
+        if (unit.isDestroyed || !unit.hasMovement()) return // May not need to check unit.isDestroyed?
+
+        val improvement = worldScreen.gameInfo.tileMap.ruleset!!.tileImprovements[action.improvementName] ?: return
+        if (!unit.currentTile.improvementFunctions.canBuildImprovement(improvement, unit.cache.state)) return
+        // Apply on authoritative state since host never receives the validated echo
+        applyRemoteCreateImprovement(action)
+        val validatedEnvelope = envelope.copy(validated = true)
+        ChatWebSocket.requestMessageSend(
+            com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
+        )
+    }
+
+    private fun applyRemoteCreateImprovement(action: GameAction.CreateImprovementAction) {
+        val unit = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName }
+            ?.units?.getUnitById(action.unitId) ?: return
+
+        if (unit.isDestroyed) return
+        val improvement = worldScreen.gameInfo.tileMap.ruleset!!.tileImprovements[action.improvementName] ?: return
+        val tile = unit.currentTile
+        tile.setImprovement(improvement, unit.civ, unit)
+        unit.destroy()
         Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
     }
 

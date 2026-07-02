@@ -316,8 +316,14 @@ object UnitActionsFromUniques {
 
         return UnitAction(UnitActionType.CreateImprovement, useFrequency, "Create [${improvement.name}]",
             action = {
-                tile.setImprovement(improvement, unit.civ, unit)
-                unit.destroy()  // Modders may wish for a nondestructive way, but that should be another Unique
+                if (unit.civ.gameInfo.gameParameters.isSimultaneousGame) {
+                    com.unciv.UncivGame.Current.worldScreen?.actionBroadcastManager
+                        ?.sendCreateImprovementAction(unit.id, improvement.name, unit.civ.civName)
+                    Unit // If you delete, you get "Argument type mismatch: actual type is 'Function0<Unit?>?', but 'Function0<Unit>?' was expected."
+                } else {
+                    tile.setImprovement(improvement, unit.civ, unit)
+                    unit.destroy() // Modders may wish for a nondestructive way, but that should be another Unique
+                }
             }.takeIf { unit.hasMovement() })
     }
 
