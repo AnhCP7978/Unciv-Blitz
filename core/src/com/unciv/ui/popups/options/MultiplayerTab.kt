@@ -24,6 +24,7 @@ import com.unciv.ui.popups.AuthPopup
 import com.unciv.ui.popups.Popup
 import com.unciv.utils.Concurrency
 import com.unciv.utils.launchOnGLThread
+import com.unciv.models.translations.tr
 import java.net.URI
 import java.time.temporal.ChronoUnit
 import kotlinx.coroutines.flow.asFlow
@@ -84,11 +85,7 @@ internal class MultiplayerTab(
     private fun addMultiplayerServerOptions(toUpdate: Iterable<RefreshSelectOptions>) {
         val connectionToServerButton = "Check connection".toTextButton()
 
-        val textToShowForOnlineMultiplayerAddress = if (Multiplayer.usesCustomServer()) {
-            mpSettings.getServer()
-        } else {
-            "https://"
-        }
+        val textToShowForOnlineMultiplayerAddress = if (Multiplayer.usesCustomServer()) mpSettings.getServer() else ""
         val multiplayerServerTextField = UncivTextField("Server address", textToShowForOnlineMultiplayerAddress)
         multiplayerServerTextField.setTextFieldFilter { _, c -> c !in " \r\n\t\\" }
         multiplayerServerTextField.programmaticChangeEvents = true
@@ -103,29 +100,42 @@ internal class MultiplayerTab(
 
         serverIpTable.add(errorTextField).colspan(2).row()
 
+        var isValid = false
+        fun validateAndSet() {
+            val text = multiplayerServerTextField.text
+            if (text.isBlank()) {
+                errorTextField.isVisible = false
+                multiplayerServerTextField.color = Color.WHITE
+                isValid = false
+                connectionToServerButton.setText("Paste from clipboard".tr())
+                connectionToServerButton.isEnabled = true
+            } else {
+                try {
+                    val uri = URI(text.trimEnd('/'))
+                    if (uri.scheme != "http" && uri.scheme != "https") {
+                        throw Error("URL must start with http:// or https://")
+                    }
+                    settings.multiplayer.setServer(uri.toURL().toString())
+                    errorTextField.isVisible = false
+                    multiplayerServerTextField.color = Color.GREEN
+                    isValid = true
+                } catch (ex: Throwable) {
+                    errorTextField.setText(ex.message)
+                    errorTextField.isVisible = true
+                    multiplayerServerTextField.color = Color.RED
+                    isValid = false
+                }
+                connectionToServerButton.setText("Check connection".tr())
+                connectionToServerButton.isEnabled = isValid
+            }
+        }
+
+        validateAndSet() // One call to init I guess?
+
         multiplayerServerTextField.onChange {
             fixTextFieldUrlOnType(multiplayerServerTextField)
-
-        try {
-            // we can't trim on 'fixTextFieldUrlOnType' for reasons
-            val uri = URI(multiplayerServerTextField.text.trimEnd('/'))
-            if (uri.scheme != "http" && uri.scheme != "https") {
-                throw Error("URL must start with http:// or https://")
-            }
-
-                // URL has stricter validation than URI
-                settings.multiplayer.setServer(uri.toURL().toString())
-                errorTextField.isVisible = false
-                multiplayerServerTextField.color = Color.GREEN
-            } catch (ex: Throwable) {
-                errorTextField.setText(ex.message)
-                errorTextField.isVisible = true
-                multiplayerServerTextField.color = Color.RED
-            }
-
+            validateAndSet()
             val isCustomServer = Multiplayer.usesCustomServer()
-            connectionToServerButton.isEnabled = isCustomServer
-
             for (refreshSelect in toUpdate) refreshSelect.update(isCustomServer)
         }
 
@@ -133,30 +143,33 @@ internal class MultiplayerTab(
             .minWidth(optionsPopup.stageToShowOn.width / 3).padRight(Constants.defaultFontSize.toFloat()).growX()
 
         serverIpTable.add(connectionToServerButton.onClick {
-            val popup = Popup(optionsPopup.stageToShowOn).apply {
-                addGoodSizedLabel("Awaiting response...").row()
-                open(true)
-            }
-
-            successfullyConnectedToServer { connectionSuccess, authSuccess ->
-                if (authSuccess == false) {
-                    popup.close()
-                    AuthPopup(optionsPopup.stageToShowOn) { success ->
-                        popup.apply {
-                            reuseWith(if (success) "Success!" else "Failed!", true)
-                            open(true)
-                        }
-                    }.open(true)
-                } else if (connectionSuccess) {
-                    if (authSuccess == true) popup.reuseWith("Success!", true)
-                    else popup.reuseWith("Auth rejected for unknown reasons, please try again.", true)
-                } else {
-                    popup.reuseWith("Failed!", true)
+            val text = multiplayerServerTextField.text
+            if (text.isBlank()) {
+                multiplayerServerTextField.text = Gdx.app.clipboard.contents
+            } else {
+                val popup = Popup(optionsPopup.stageToShowOn).apply {
+                    addGoodSizedLabel("Awaiting response...").row()
+                    open(true)
                 }
-    
-                if (connectionSuccess) {
-                    // because multiplayer server url can get autopatched during isAilve test
-                    multiplayerServerTextField.text = settings.multiplayer.getServer()
+
+                successfullyConnectedToServer { connectionSuccess, authSuccess ->
+                    if (authSuccess == false) {
+                        popup.close()
+                        AuthPopup(optionsPopup.stageToShowOn) { success ->
+                            popup.apply {
+                                reuseWith(if (success) "Success!" else "Failed!", true)
+                                open(true)
+                            }
+                        }.open(true)
+                    } else if (connectionSuccess) {
+                        if (authSuccess == true) popup.reuseWith("Success!", true)
+                        else popup.reuseWith("Auth rejected for unknown reasons, please try again.", true)
+                    } else {
+                        popup.reuseWith("Failed!", true)
+                    }
+
+                    if (connectionSuccess)
+                        multiplayerServerTextField.text = settings.multiplayer.getServer() // MP server url could get autopatched during isAilve test
                 }
             }
         }).row()
