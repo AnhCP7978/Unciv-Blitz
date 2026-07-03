@@ -197,6 +197,91 @@ sealed class GameAction {
     ) : GameAction() {
         override val civName: String get() = decliningCiv
     }
+
+    // ──────────────────────────────────────
+    //  City-State interaction actions
+    // ──────────────────────────────────────
+
+    @Serializable
+    @SerialName("tributeGold")
+    data class TributeGoldAction(
+        val cityStateCivName: String,
+        override val civName: String,
+    ) : GameAction()
+
+    @Serializable
+    @SerialName("tributeWorker")
+    data class TributeWorkerAction(
+        val cityStateCivName: String,
+        override val civName: String,
+    ) : GameAction()
+
+    @Serializable
+    @SerialName("goldGift")
+    data class GoldGiftAction(
+        val cityStateCivName: String,
+        val giftAmount: Int,
+        override val civName: String,
+    ) : GameAction()
+
+    @Serializable
+    @SerialName("setProtection")
+    data class SetProtectionAction(
+        val cityStateCivName: String,
+        val protect: Boolean, // true=pledge, false=revoke
+        override val civName: String,
+    ) : GameAction()
+
+    @Serializable
+    @SerialName("giftImprovement")
+    data class GiftImprovementAction(
+        val cityStateCivName: String,
+        val tileX: Int,
+        val tileY: Int,
+        val improvementName: String,
+        override val civName: String,
+    ) : GameAction()
+
+    @Serializable
+    @SerialName("diplomaticMarriage")
+    data class DiplomaticMarriageAction(
+        val cityStateCivName: String,
+        override val civName: String,
+    ) : GameAction()
+
+    // ──────────────────────────────────────
+    //  Religion actions
+    // ──────────────────────────────────────
+
+    @Serializable
+    @SerialName("foundReligion")
+    data class FoundReligionAction(
+        val unitId: Int,
+        override val civName: String,
+    ) : GameAction()
+
+    @Serializable
+    @SerialName("enhanceReligion")
+    data class EnhanceReligionAction(
+        val unitId: Int,
+        override val civName: String,
+    ) : GameAction()
+
+    @Serializable
+    @SerialName("completeFoundReligion")
+    data class CompleteFoundReligionAction(
+        override val civName: String,
+        val displayName: String,
+        val religionName: String,
+        val beliefNames: List<String>,
+    ) : GameAction()
+
+    @Serializable
+    @SerialName("completeEnhanceReligion")
+    data class CompleteEnhanceReligionAction(
+        override val civName: String,
+        val beliefNames: List<String>,
+    ) : GameAction()
 }
 
 // ──────────────────────────────────────

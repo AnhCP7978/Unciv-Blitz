@@ -91,6 +91,14 @@ object SimultaneousModeInterceptor {
                 broadcastManager.sendPillageAction(unit.id, unit.civ.civName)
                 return ({})  // block ALL players — apply only via broadcast echo
             }
+            UnitActionType.FoundReligion -> {
+                broadcastManager.sendFoundReligionAction(unit.id, unit.civ.civName)
+                return ({})
+            }
+            UnitActionType.EnhanceReligion -> {
+                broadcastManager.sendEnhanceReligionAction(unit.id, unit.civ.civName)
+                return ({})
+            }
             else -> return null  // don't intercept other actions
         }
     }

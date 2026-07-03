@@ -669,14 +669,15 @@ class PolicyPickerScreen(
         if (viewingCiv.gameInfo.gameParameters.isSimultaneousGame) {
             com.unciv.UncivGame.Current.worldScreen?.actionBroadcastManager
                 ?.sendAdoptPolicyAction(policy.name, viewingCiv.civName)
+            game.popScreen()
         } else {
             viewingCiv.policies.adopt(policy)
-        }
 
-        // If we've moved to another screen in the meantime (great person pick, victory screen) ignore this
-        // update policies
-        if (game.screen !is PolicyPickerScreen) game.popScreen()
-        else game.replaceCurrentScreen(recreate())
+            // If we've moved to another screen in the meantime (great person pick, victory screen) ignore this
+            // update policies
+            if (game.screen !is PolicyPickerScreen) game.popScreen()
+            else game.replaceCurrentScreen(recreate())
+        }
     }
 
     override fun recreate(): BaseScreen {

@@ -5,6 +5,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Button
 import com.badlogic.gdx.scenes.scene2d.ui.Table
 import com.badlogic.gdx.utils.Align
 import com.unciv.Constants
+import com.unciv.UncivGame
 import com.unciv.logic.civilization.Civilization
 import com.unciv.logic.civilization.managers.ReligionState
 import com.unciv.models.Counter
@@ -77,6 +78,25 @@ class ReligiousBeliefsPickerScreen (
             if (pickIconAndName) "Choose a Religion"
             else "Enhance [${currentReligion.getReligionDisplayName()}]"
         ) {
+            if (civInfo.gameInfo.gameParameters.isSimultaneousGame) {
+                val worldScreen = UncivGame.Current.worldScreen
+                val broadcastManager = worldScreen?.actionBroadcastManager
+                if (broadcastManager != null) {
+                    val beliefNames = beliefsToChoose.map { it.belief!!.name }
+                    if (civInfo.religionManager.religionState == ReligionState.FoundingReligion) {
+                        broadcastManager.sendCompleteFoundReligionAction(
+                            civInfo.civName, displayName!!, religionName!!, beliefNames
+                        )
+                    } else {
+                        broadcastManager.sendCompleteEnhanceReligionAction(
+                            civInfo.civName, beliefNames
+                        )
+                    }
+                    // Need to dismiss this screen — the validated echo will update state
+                    UncivGame.Current.popScreen()
+                    return@setOKAction
+                }
+            }
             if (civInfo.religionManager.religionState == ReligionState.FoundingReligion)
                 civInfo.religionManager.foundReligion(displayName!!, religionName!!)
             chooseBeliefs(beliefsToChoose.map { it.belief!! }, usingFreeBeliefs())

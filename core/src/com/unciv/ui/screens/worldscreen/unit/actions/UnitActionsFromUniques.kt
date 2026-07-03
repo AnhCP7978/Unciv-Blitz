@@ -357,12 +357,16 @@ object UnitActionsFromUniques {
                     ),
                     associatedUnique = unique,
                     action = {
-                        val unitTile = unit.getTile()
-                        unitTile.setImprovement(improvement, unit.civ, unit)
-
-                        unit.civ.cache.updateViewableTiles() // to update 'last seen improvement'
-
-                        UnitActionModifiers.activateSideEffects(unit, unique)
+                        if (unit.civ.gameInfo.gameParameters.isSimultaneousGame) {
+                            com.unciv.UncivGame.Current.worldScreen?.actionBroadcastManager
+                                ?.sendCreateImprovementAction(unit.id, improvement.name, unit.civ.civName)
+                            Unit
+                        } else {
+                            val unitTile = unit.getTile()
+                            unitTile.setImprovement(improvement, unit.civ, unit)
+                            unit.civ.cache.updateViewableTiles() // to update 'last seen improvement'
+                            UnitActionModifiers.activateSideEffects(unit, unique)
+                        }
                     }.takeIf {
                         resourcesAvailable
                             && unit.hasMovement()

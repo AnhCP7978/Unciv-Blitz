@@ -112,6 +112,16 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
             is GameAction.RetractTradeRequestAction -> applyRemoteRetractTradeRequest(action)
             is GameAction.AcceptTradeAction -> applyRemoteAcceptTrade(action)
             is GameAction.DeclineTradeRequestAction -> applyRemoteDeclineTradeRequest(action)
+            is GameAction.TributeGoldAction -> applyRemoteTributeGold(action)
+            is GameAction.TributeWorkerAction -> applyRemoteTributeWorker(action)
+            is GameAction.GoldGiftAction -> applyRemoteGoldGift(action)
+            is GameAction.SetProtectionAction -> applyRemoteSetProtection(action)
+            is GameAction.GiftImprovementAction -> applyRemoteGiftImprovement(action)
+            is GameAction.DiplomaticMarriageAction -> applyRemoteDiplomaticMarriage(action)
+            is GameAction.FoundReligionAction -> applyRemoteFoundReligion(action)
+            is GameAction.EnhanceReligionAction -> applyRemoteEnhanceReligion(action)
+            is GameAction.CompleteFoundReligionAction -> applyRemoteCompleteFoundReligion(action)
+            is GameAction.CompleteEnhanceReligionAction -> applyRemoteCompleteEnhanceReligion(action)
             else -> {}
         }
     }
@@ -178,16 +188,56 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
     fun sendDeclineTradeRequestAction(trade: Trade, requestingCiv: String, civName: String) =
         sendGameAction(GameAction.DeclineTradeRequestAction(civName, requestingCiv, trade.toTradeData()))
 
+    // ──────────────────────────────────────
+    //  City-State interaction sends
+    // ──────────────────────────────────────
+
+    fun sendTributeGoldAction(cityStateCivName: String, civName: String) =
+        sendGameAction(GameAction.TributeGoldAction(cityStateCivName, civName))
+
+    fun sendTributeWorkerAction(cityStateCivName: String, civName: String) =
+        sendGameAction(GameAction.TributeWorkerAction(cityStateCivName, civName))
+
+    fun sendGoldGiftAction(cityStateCivName: String, giftAmount: Int, civName: String) =
+        sendGameAction(GameAction.GoldGiftAction(cityStateCivName, giftAmount, civName))
+
+    fun sendSetProtectionAction(cityStateCivName: String, protect: Boolean, civName: String) =
+        sendGameAction(GameAction.SetProtectionAction(cityStateCivName, protect, civName))
+
+    fun sendGiftImprovementAction(cityStateCivName: String, tileX: Int, tileY: Int, improvementName: String, civName: String) =
+        sendGameAction(GameAction.GiftImprovementAction(cityStateCivName, tileX, tileY, improvementName, civName))
+
+    fun sendDiplomaticMarriageAction(cityStateCivName: String, civName: String) =
+        sendGameAction(GameAction.DiplomaticMarriageAction(cityStateCivName, civName))
+
+    // ──────────────────────────────────────
+    //  Religion sends
+    // ──────────────────────────────────────
+
+    fun sendFoundReligionAction(unitId: Int, civName: String) =
+        sendGameAction(GameAction.FoundReligionAction(unitId, civName))
+
+    fun sendEnhanceReligionAction(unitId: Int, civName: String) =
+        sendGameAction(GameAction.EnhanceReligionAction(unitId, civName))
+
+    fun sendCompleteFoundReligionAction(civName: String, displayName: String, religionName: String, beliefNames: List<String>) =
+        sendGameAction(GameAction.CompleteFoundReligionAction(civName, displayName, religionName, beliefNames))
+
+    fun sendCompleteEnhanceReligionAction(civName: String, beliefNames: List<String>) =
+        sendGameAction(GameAction.CompleteEnhanceReligionAction(civName, beliefNames))
+
     init {
         // Register as the action response handler in ChatStore
         ChatStore.onActionResponse = { response ->
             onActionResponse(response)
         }
+
         // Ensure WebSocket subscription for this game (handles reconnect/resume)
         ChatStore.getChatByGameId(gameId)
         ChatWebSocket.requestMessageSend(
             com.unciv.logic.multiplayer.chat.Message.Join(listOf(gameId))
         )
+
         // If this player is the host, inform the server
         if (isHost()) {
             ChatWebSocket.requestMessageSend(
@@ -458,6 +508,96 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
                 debug("Applying remote decline trade request: %s declines %s",
                     action.decliningCiv, action.requestingCiv)
                 applyRemoteDeclineTradeRequest(action)
+            }
+            is GameAction.TributeGoldAction -> {
+                if (!packet.validated) {
+                    if (isHost()) hostValidateTributeGold(packet)
+                    return
+                }
+                debug("Applying remote tribute gold: %s -> %s",
+                    action.civName, action.cityStateCivName)
+                applyRemoteTributeGold(action)
+            }
+            is GameAction.TributeWorkerAction -> {
+                if (!packet.validated) {
+                    if (isHost()) hostValidateTributeWorker(packet)
+                    return
+                }
+                debug("Applying remote tribute worker: %s -> %s",
+                    action.civName, action.cityStateCivName)
+                applyRemoteTributeWorker(action)
+            }
+            is GameAction.GoldGiftAction -> {
+                if (!packet.validated) {
+                    if (isHost()) hostValidateGoldGift(packet)
+                    return
+                }
+                debug("Applying remote gold gift: %s -> %s (%s gold)",
+                    action.civName, action.cityStateCivName, action.giftAmount)
+                applyRemoteGoldGift(action)
+            }
+            is GameAction.SetProtectionAction -> {
+                if (!packet.validated) {
+                    if (isHost()) hostValidateSetProtection(packet)
+                    return
+                }
+                debug("Applying remote set protection: %s %s %s",
+                    action.civName, if (action.protect) "pledges" else "revokes", action.cityStateCivName)
+                applyRemoteSetProtection(action)
+            }
+            is GameAction.GiftImprovementAction -> {
+                if (!packet.validated) {
+                    if (isHost()) hostValidateGiftImprovement(packet)
+                    return
+                }
+                debug("Applying remote gift improvement: %s -> %s (%s)",
+                    action.civName, action.cityStateCivName, action.improvementName)
+                applyRemoteGiftImprovement(action)
+            }
+            is GameAction.DiplomaticMarriageAction -> {
+                if (!packet.validated) {
+                    if (isHost()) hostValidateDiplomaticMarriage(packet)
+                    return
+                }
+                debug("Applying remote diplomatic marriage: %s <- %s",
+                    action.civName, action.cityStateCivName)
+                applyRemoteDiplomaticMarriage(action)
+            }
+            is GameAction.FoundReligionAction -> {
+                if (!packet.validated) {
+                    if (isHost()) hostValidateFoundReligion(packet)
+                    return
+                }
+                debug("Applying remote found religion: %s unit %s",
+                    action.civName, action.unitId)
+                applyRemoteFoundReligion(action)
+            }
+            is GameAction.EnhanceReligionAction -> {
+                if (!packet.validated) {
+                    if (isHost()) hostValidateEnhanceReligion(packet)
+                    return
+                }
+                debug("Applying remote enhance religion: %s unit %s",
+                    action.civName, action.unitId)
+                applyRemoteEnhanceReligion(action)
+            }
+            is GameAction.CompleteFoundReligionAction -> {
+                if (!packet.validated) {
+                    if (isHost()) hostValidateCompleteFoundReligion(packet)
+                    return
+                }
+                debug("Applying remote complete found religion: %s -> %s",
+                    action.civName, action.religionName)
+                applyRemoteCompleteFoundReligion(action)
+            }
+            is GameAction.CompleteEnhanceReligionAction -> {
+                if (!packet.validated) {
+                    if (isHost()) hostValidateCompleteEnhanceReligion(packet)
+                    return
+                }
+                debug("Applying remote complete enhance religion: %s",
+                    action.civName)
+                applyRemoteCompleteEnhanceReligion(action)
             }
             else -> {}
         }
@@ -1187,6 +1327,221 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
         }
         tradeRequest?.decline(decliningCiv)
         decliningCiv.tradeRequests.removeAll { it.requestingCiv == action.requestingCiv }
+        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
+    }
+
+    // ──────────────────────────────────────
+    //  City-State: Tribute Gold
+    // ──────────────────────────────────────
+
+    private fun hostValidateTributeGold(envelope: GameActionPacket) {
+        val action = envelope.action as? GameAction.TributeGoldAction ?: return
+        applyRemoteTributeGold(action)
+        val validatedEnvelope = envelope.copy(validated = true)
+        ChatWebSocket.requestMessageSend(
+            com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
+        )
+    }
+
+    private fun applyRemoteTributeGold(action: GameAction.TributeGoldAction) {
+        val cs = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.cityStateCivName } ?: return
+        val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
+        cs.cityStateFunctions.tributeGold(civ)
+        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
+    }
+
+    // ──────────────────────────────────────
+    //  City-State: Tribute Worker
+    // ──────────────────────────────────────
+
+    private fun hostValidateTributeWorker(envelope: GameActionPacket) {
+        val action = envelope.action as? GameAction.TributeWorkerAction ?: return
+        applyRemoteTributeWorker(action)
+        val validatedEnvelope = envelope.copy(validated = true)
+        ChatWebSocket.requestMessageSend(
+            com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
+        )
+    }
+
+    private fun applyRemoteTributeWorker(action: GameAction.TributeWorkerAction) {
+        val cs = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.cityStateCivName } ?: return
+        val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
+        cs.cityStateFunctions.tributeWorker(civ)
+        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
+    }
+
+    // ──────────────────────────────────────
+    //  City-State: Gold Gift
+    // ──────────────────────────────────────
+
+    private fun hostValidateGoldGift(envelope: GameActionPacket) {
+        val action = envelope.action as? GameAction.GoldGiftAction ?: return
+        applyRemoteGoldGift(action)
+        val validatedEnvelope = envelope.copy(validated = true)
+        ChatWebSocket.requestMessageSend(
+            com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
+        )
+    }
+
+    private fun applyRemoteGoldGift(action: GameAction.GoldGiftAction) {
+        val cs = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.cityStateCivName } ?: return
+        val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
+        cs.cityStateFunctions.receiveGoldGift(civ, action.giftAmount)
+        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
+    }
+
+    // ──────────────────────────────────────
+    //  City-State: Set Protection
+    // ──────────────────────────────────────
+
+    private fun hostValidateSetProtection(envelope: GameActionPacket) {
+        val action = envelope.action as? GameAction.SetProtectionAction ?: return
+        applyRemoteSetProtection(action)
+        val validatedEnvelope = envelope.copy(validated = true)
+        ChatWebSocket.requestMessageSend(
+            com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
+        )
+    }
+
+    private fun applyRemoteSetProtection(action: GameAction.SetProtectionAction) {
+        val cs = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.cityStateCivName } ?: return
+        val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
+        if (action.protect) cs.cityStateFunctions.addProtectorCiv(civ)
+        else cs.cityStateFunctions.removeProtectorCiv(civ)
+        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
+    }
+
+    // ──────────────────────────────────────
+    //  City-State: Gift Improvement
+    // ──────────────────────────────────────
+
+    private fun hostValidateGiftImprovement(envelope: GameActionPacket) {
+        val action = envelope.action as? GameAction.GiftImprovementAction ?: return
+        applyRemoteGiftImprovement(action)
+        val validatedEnvelope = envelope.copy(validated = true)
+        ChatWebSocket.requestMessageSend(
+            com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
+        )
+    }
+
+    private fun applyRemoteGiftImprovement(action: GameAction.GiftImprovementAction) {
+        val cs = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.cityStateCivName } ?: return
+        val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
+        val tile = worldScreen.gameInfo.tileMap[action.tileX, action.tileY] ?: return
+        val improvement = worldScreen.gameInfo.tileMap.ruleset!!.tileImprovements[action.improvementName] ?: return
+        civ.addGold(-200)
+        tile.stopWorkingOnImprovement()
+        tile.setImprovement(improvement)
+        cs.cache.updateCivResources()
+        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
+    }
+
+    // ──────────────────────────────────────
+    //  City-State: Diplomatic Marriage
+    // ──────────────────────────────────────
+
+    private fun hostValidateDiplomaticMarriage(envelope: GameActionPacket) {
+        val action = envelope.action as? GameAction.DiplomaticMarriageAction ?: return
+        applyRemoteDiplomaticMarriage(action)
+        val validatedEnvelope = envelope.copy(validated = true)
+        ChatWebSocket.requestMessageSend(
+            com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
+        )
+    }
+
+    private fun applyRemoteDiplomaticMarriage(action: GameAction.DiplomaticMarriageAction) {
+        val cs = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.cityStateCivName } ?: return
+        val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
+        cs.cityStateFunctions.diplomaticMarriage(civ)
+        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
+    }
+
+    // ──────────────────────────────────────
+    //  Religion: Found Religion (prophet action)
+    // ──────────────────────────────────────
+
+    private fun hostValidateFoundReligion(envelope: GameActionPacket) {
+        val action = envelope.action as? GameAction.FoundReligionAction ?: return
+        applyRemoteFoundReligion(action)
+        val validatedEnvelope = envelope.copy(validated = true)
+        ChatWebSocket.requestMessageSend(
+            com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
+        )
+    }
+
+    private fun applyRemoteFoundReligion(action: GameAction.FoundReligionAction) {
+        val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
+        val unit = civ.units.getCivUnits().firstOrNull { it.id == action.unitId } ?: return
+        if (unit.isDestroyed) return
+        civ.religionManager.foundReligion(unit)
+        unit.consume()
+        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
+    }
+
+    // ──────────────────────────────────────
+    //  Religion: Enhance Religion (prophet action)
+    // ──────────────────────────────────────
+
+    private fun hostValidateEnhanceReligion(envelope: GameActionPacket) {
+        val action = envelope.action as? GameAction.EnhanceReligionAction ?: return
+        applyRemoteEnhanceReligion(action)
+        val validatedEnvelope = envelope.copy(validated = true)
+        ChatWebSocket.requestMessageSend(
+            com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
+        )
+    }
+
+    private fun applyRemoteEnhanceReligion(action: GameAction.EnhanceReligionAction) {
+        val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
+        val unit = civ.units.getCivUnits().firstOrNull { it.id == action.unitId } ?: return
+        if (unit.isDestroyed) return
+        civ.religionManager.useProphetForEnhancingReligion(unit)
+        unit.consume()
+        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
+    }
+
+    // ──────────────────────────────────────
+    //  Religion: Complete Found Religion (picker completion)
+    // ──────────────────────────────────────
+
+    private fun hostValidateCompleteFoundReligion(envelope: GameActionPacket) {
+        val action = envelope.action as? GameAction.CompleteFoundReligionAction ?: return
+        applyRemoteCompleteFoundReligion(action)
+        val validatedEnvelope = envelope.copy(validated = true)
+        ChatWebSocket.requestMessageSend(
+            com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
+        )
+    }
+
+    private fun applyRemoteCompleteFoundReligion(action: GameAction.CompleteFoundReligionAction) {
+        val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
+        civ.religionManager.foundReligion(action.displayName, action.religionName)
+        val beliefs = action.beliefNames.mapNotNull { name ->
+            worldScreen.gameInfo.ruleset.beliefs[name]
+        }
+        civ.religionManager.chooseBeliefs(beliefs)
+        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
+    }
+
+    // ──────────────────────────────────────
+    //  Religion: Complete Enhance Religion (picker completion)
+    // ──────────────────────────────────────
+
+    private fun hostValidateCompleteEnhanceReligion(envelope: GameActionPacket) {
+        val action = envelope.action as? GameAction.CompleteEnhanceReligionAction ?: return
+        applyRemoteCompleteEnhanceReligion(action)
+        val validatedEnvelope = envelope.copy(validated = true)
+        ChatWebSocket.requestMessageSend(
+            com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
+        )
+    }
+
+    private fun applyRemoteCompleteEnhanceReligion(action: GameAction.CompleteEnhanceReligionAction) {
+        val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
+        val beliefs = action.beliefNames.mapNotNull { name ->
+            worldScreen.gameInfo.ruleset.beliefs[name]
+        }
+        civ.religionManager.chooseBeliefs(beliefs)
         Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
     }
 
