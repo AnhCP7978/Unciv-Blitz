@@ -7,6 +7,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Image
 import com.badlogic.gdx.scenes.scene2d.ui.Label
 import com.badlogic.gdx.scenes.scene2d.ui.Table
 import com.badlogic.gdx.utils.Align
+import com.unciv.UncivGame // Only for simultaneous mode
 import com.unciv.Constants
 import com.unciv.GUI
 import com.unciv.logic.civilization.Civilization
@@ -118,7 +119,14 @@ class TechPickerScreen(
             val freeTech = selectedTech!!.name
             // More evil people fast-clicking to cheat - #4977
             if (!researchableTechs.contains(freeTech)) return
-            civTech.getFreeTechnology(selectedTech!!.name)
+            if (civInfo.gameInfo.gameParameters.isSimultaneousGame) {
+                UncivGame.Current.worldScreen?.actionBroadcastManager
+                    ?.sendChooseFreeTechAction(freeTech, civInfo.civName)
+                // Decrement locally so the picker doesn't re-open before the echo arrives
+                civTech.freeTechs--
+            } else {
+                civTech.getFreeTechnology(selectedTech!!.name)
+            }
         }
         else civTech.techsToResearch = tempTechsToResearch
 

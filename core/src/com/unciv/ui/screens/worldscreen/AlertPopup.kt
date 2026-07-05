@@ -206,6 +206,12 @@ class AlertPopup(
         addQuestionAboutTheCity(city.name)
         val conqueringCiv = gameInfo.getCurrentPlayerCivilization()
 
+        fun broadcastCapture(mode: String) {
+            if (gameInfo.gameParameters.isSimultaneousGame)
+                worldScreen.actionBroadcastManager
+                    ?.sendCaptureCityAction(city.id, conqueringCiv.civName, mode)
+        }
+
         if (city.foundingCivObject != null
                 && city.civ != city.foundingCivObject // can't liberate if the city actually belongs to those guys
                 && conqueringCiv != city.foundingCivObject) { // or belongs originally to us
@@ -217,16 +223,19 @@ class AlertPopup(
             addDestroyOption {
                 city.puppetCity(conqueringCiv)
                 city.destroyCity()
+                broadcastCapture("Destroy")
             }
         } else {
             val mayAnnex = !conqueringCiv.hasUnique(UniqueType.MayNotAnnexCities)
             addAnnexOption(city, mayAnnex = mayAnnex) {
                 city.puppetCity(conqueringCiv)
+                broadcastCapture("Annex")
             }
             addSeparator()
 
             addPuppetOption(mayAnnex = mayAnnex) {
                 city.puppetCity(conqueringCiv)
+                broadcastCapture("Puppet")
             }
             addSeparator()
 
@@ -621,6 +630,9 @@ class AlertPopup(
         val button = "Liberate (city returns to [originalOwner])".fillPlaceholders(city.foundingCivObject!!.civName).toTextButton()
         button.onActivation {
             city.liberateCity(conqueringCiv)
+            if (gameInfo.gameParameters.isSimultaneousGame)
+                worldScreen.actionBroadcastManager
+                    ?.sendCaptureCityAction(city.id, conqueringCiv.civName, "Liberate")
             close()
         }
         button.keyShortcuts.add('l')
@@ -638,6 +650,9 @@ class AlertPopup(
                     city.puppetCity(conqueringCiv)
                     if (mayAnnex) { city.annexCity() }
                     city.isBeingRazed = true
+                    if (gameInfo.gameParameters.isSimultaneousGame)
+                        worldScreen.actionBroadcastManager
+                            ?.sendCaptureCityAction(city.id, conqueringCiv.civName, "Raze")
                     close()
                 }
                 keyShortcuts.add('r')

@@ -112,6 +112,7 @@ sealed interface GameAction {
     data class CaptureCityAction(
         val cityId: String,
         val civName: String, // conquerer civName
+        val mode: String, // "Puppet", "Annex", "Raze", "Liberate", ("Destroy" for one-city challenge mode)
     ) : GameAction
 
     // ═══════════════════════════════════════════
@@ -140,6 +141,13 @@ sealed interface GameAction {
     ) : GameAction
 
     @Serializable
+    @SerialName("chooseFreeTech")
+    data class ChooseFreeTechAction(
+        val techName: String,
+        val civName: String,
+    ) : GameAction
+
+    @Serializable
     @SerialName("foundPantheon")
     data class FoundPantheonAction(
         val beliefName: String,
@@ -152,6 +160,9 @@ sealed interface GameAction {
         val unitName: String,
         val cityId: String?,
         val civName: String,
+        val freeGreatPeopleDecrement: Int = 0,
+        val mayaLimitedFreeGPDecrement: Int = 0,
+        val longCountGPPoolRemoval: List<String> = emptyList(),
     ) : GameAction
 
     // ═══════════════════════════════════════════

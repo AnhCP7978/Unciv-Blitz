@@ -112,6 +112,7 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
             is GameAction.DeclareWarAction -> applyRemoteDeclareWar(action)
             is GameAction.CaptureCityAction -> applyRemoteCaptureCity(action)
             is GameAction.AdoptPolicyAction -> applyRemoteAdoptPolicy(action)
+            is GameAction.ChooseFreeTechAction -> applyRemoteChooseFreeTech(action)
             is GameAction.FoundPantheonAction -> applyRemoteFoundPantheon(action)
             is GameAction.SpawnUnitAction -> applyRemoteSpawnUnit(action)
             is GameAction.CompleteFoundReligionAction -> applyRemoteCompleteFoundReligion(action)
@@ -150,6 +151,9 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
     fun sendDeclareWarAction(civName: String, otherCivName: String) =
         sendGameAction(GameAction.DeclareWarAction(civName, otherCivName))
 
+    fun sendCaptureCityAction(cityId: String, civName: String, mode: String) =
+        sendGameAction(GameAction.CaptureCityAction(cityId, civName, mode))
+
     fun sendCityBombardAction(cityId: String, targetTileX: Int, targetTileY: Int) =
         sendGameAction(GameAction.CityBombardAction(cityId, targetTileX, targetTileY))
 
@@ -165,11 +169,23 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
     fun sendAdoptPolicyAction(policyName: String, civName: String) =
         sendGameAction(GameAction.AdoptPolicyAction(policyName, civName))
 
+    fun sendChooseFreeTechAction(techName: String, civName: String) =
+        sendGameAction(GameAction.ChooseFreeTechAction(techName, civName))
+
     fun sendFoundPantheonAction(beliefName: String, civName: String) =
         sendGameAction(GameAction.FoundPantheonAction(beliefName, civName))
 
-    fun sendSpawnUnitAction(unitName: String, cityId: String?, civName: String) =
-        sendGameAction(GameAction.SpawnUnitAction(unitName, cityId, civName))
+    fun sendSpawnUnitAction(
+        unitName: String, cityId: String?, civName: String,
+        freeGreatPeopleDecrement: Int = 0,
+        mayaLimitedFreeGPDecrement: Int = 0,
+        longCountGPPoolRemoval: List<String> = emptyList(),
+    ) = sendGameAction(
+        GameAction.SpawnUnitAction(
+            unitName, cityId, civName,
+            freeGreatPeopleDecrement, mayaLimitedFreeGPDecrement, longCountGPPoolRemoval,
+        )
+    )
 
     fun sendSendTradeRequestAction(trade: Trade, targetCiv: String, civName: String) =
         sendGameAction(GameAction.SendTradeRequestAction(civName, targetCiv, trade.toTradeData()))
@@ -296,7 +312,7 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
                     freePolicies = civ.policies.freePolicies,
                     storedCulture = civ.policies.storedCulture,
                     tileImprovements = civ.gameInfo.tileMap.tileList
-                        .filter { it.improvementInProgress != null && it.getOwner() == civ }
+                        .filter { it.improvementInProgress != null } // may make you be able to work in other civ's tile?
                         .associate { "${it.position.x},${it.position.y}" to it.improvementInProgress!! },
                 )
                 Json.encodeToString(choices)
@@ -393,6 +409,15 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
                 debug("Applying remote found pantheon: %s for %s",
                     action.beliefName, action.civName)
                 applyRemoteFoundPantheon(action)
+            }
+            is GameAction.ChooseFreeTechAction -> {
+                if (!packet.validated) {
+                    if (isHost()) hostValidateChooseFreeTech(packet)
+                    return
+                }
+                debug("Applying remote choose free tech: %s for %s",
+                    action.techName, action.civName)
+                applyRemoteChooseFreeTech(action)
             }
             is GameAction.CreateImprovementAction -> {
                 if (!packet.validated) {
@@ -897,23 +922,42 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
 
     private fun hostValidateCaptureCity(envelope: GameActionPacket) {
         val action = envelope.action as? GameAction.CaptureCityAction ?: return
+        val city = findCityById(action.cityId) ?: run {
+            debug("Host rejected capture: city %s not found", action.cityId)
+            return
+        }
+        val conquerer = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName }
+        if (conquerer == null) {
+            debug("Host rejected capture: civ %s not found", action.civName)
+            return
+        }
+        if (city.civ.civName == action.civName) return // déjà vu
         applyRemoteCaptureCity(action)
         val validatedEnvelope = envelope.copy(validated = true)
         ChatWebSocket.requestMessageSend(
             com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
         )
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
     }
 
     private fun applyRemoteCaptureCity(action: GameAction.CaptureCityAction) {
         val city = findCityById(action.cityId) ?: return
         val conquerer = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
-        // Capture city logic — the actual capture happens in battle system
-        // For now this is a placeholder that records which civ captured it
-        val tile = city.getCenterTile()
-        val oldOwner = city.civ
-        if (oldOwner.civName == action.civName) return // déjà vu
-        // In a full implementation this would transfer the city to the new owner
+        if (city.civ.civName == action.civName) return // déjà vu — already under this civ
+
+        when (action.mode) {
+            "Puppet" -> city.puppetCity(conquerer)
+            "Annex" -> {
+                city.puppetCity(conquerer)
+                city.annexCity()
+            }
+            "Raze" -> {
+                city.puppetCity(conquerer)
+                city.annexCity()
+                city.isBeingRazed = true
+            }
+            "Liberate" -> city.liberateCity(conquerer)
+            "Destroy" -> city.destroyCity(true)
+        }
         Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
     }
 
@@ -1004,6 +1048,34 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
     }
 
     // ════════════════════════════════════════
+    //  Choose Free Tech (Great Library, etc.)
+    // ════════════════════════════════════════
+
+    private fun hostValidateChooseFreeTech(envelope: GameActionPacket) {
+        val action = envelope.action as? GameAction.ChooseFreeTechAction ?: return
+        val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
+        val tech = worldScreen.gameInfo.ruleset.technologies[action.techName] ?: return
+        if (!civ.tech.canBeResearched(tech.name)) return
+        // Decrement on authoritative host state — sender already decremented locally
+        civ.tech.freeTechs--
+        applyRemoteChooseFreeTech(action)
+        val validatedEnvelope = envelope.copy(validated = true)
+        ChatWebSocket.requestMessageSend(
+            com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
+        )
+    }
+
+    private fun applyRemoteChooseFreeTech(action: GameAction.ChooseFreeTechAction) {
+        val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
+        val tech = worldScreen.gameInfo.ruleset.technologies[action.techName] ?: return
+        if (civ.tech.isResearched(tech.name)) return
+        // Use addTechnology directly — the sender already decremented freeTechs locally
+        civ.tech.addTechnology(tech.name)
+        civ.tech.updateResearchProgress()
+        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
+    }
+
+    // ════════════════════════════════════════
     //  Pantheon founding
     // ════════════════════════════════════════
 
@@ -1065,6 +1137,14 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
         val baseUnit = worldScreen.gameInfo.ruleset.units[action.unitName] ?: return
         civ.getEquivalentUnit(baseUnit)
         applyRemoteSpawnUnit(action)
+        // Apply great person counter decrements on authoritative host state
+        // Non-host already does this locally, so the validated echo must not double-decrement
+        if (action.freeGreatPeopleDecrement > 0)
+            civ.greatPeople.freeGreatPeople -= action.freeGreatPeopleDecrement
+        if (action.mayaLimitedFreeGPDecrement > 0)
+            civ.greatPeople.mayaLimitedFreeGP -= action.mayaLimitedFreeGPDecrement
+        for (unitName in action.longCountGPPoolRemoval)
+            civ.greatPeople.longCountGPPool.remove(unitName)
         val validatedEnvelope = envelope.copy(validated = true)
         ChatWebSocket.requestMessageSend(
             com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
@@ -1076,6 +1156,14 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
         if (civ.cities.isEmpty()) return
         val city = action.cityId?.let { id -> civ.cities.firstOrNull { it.id == id } }
         civ.units.addUnit(action.unitName, city ?: civ.getCapital() ?: civ.cities.firstOrNull())
+        // Apply great person counter decrements — these were incremented on both host and non-host
+        // by unique triggers from policy adoption / wonder completion, so both must decrement.
+        if (action.freeGreatPeopleDecrement > 0)
+            civ.greatPeople.freeGreatPeople -= action.freeGreatPeopleDecrement
+        if (action.mayaLimitedFreeGPDecrement > 0)
+            civ.greatPeople.mayaLimitedFreeGP -= action.mayaLimitedFreeGPDecrement
+        for (unitName in action.longCountGPPoolRemoval)
+            civ.greatPeople.longCountGPPool.remove(unitName)
         Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
     }
 
