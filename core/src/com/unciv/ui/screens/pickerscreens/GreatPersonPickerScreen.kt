@@ -46,7 +46,12 @@ class GreatPersonPickerScreen(val worldScreen: WorldScreen, val civInfo: Civiliz
     }
 
     private fun confirmAction(useMayaLongCount: Boolean) {
-        civInfo.units.addUnit(theChosenOne!!, civInfo.getCapital())
+        if (civInfo.gameInfo.gameParameters.isSimultaneousGame) {
+            UncivGame.Current.worldScreen?.actionBroadcastManager
+                ?.sendSpawnUnitAction(theChosenOne!!.name, civInfo.getCapital()?.id, civInfo.civName)
+        } else {
+            civInfo.units.addUnit(theChosenOne!!, civInfo.getCapital())
+        }
         civInfo.greatPeople.freeGreatPeople--
         if (useMayaLongCount) {
             civInfo.greatPeople.mayaLimitedFreeGP--

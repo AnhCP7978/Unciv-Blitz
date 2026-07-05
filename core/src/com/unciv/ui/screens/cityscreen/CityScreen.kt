@@ -450,8 +450,7 @@ class CityScreen(
                     GUI.getWorldScreen(),
                     city.id,
                     selectedTile.position.x,
-                    selectedTile.position.y,
-                    city.civ.civName
+                    selectedTile.position.y
                 )) return@ConfirmPopup
             SoundPlayer.play(UncivSound.Coin)
             city.expansion.buyTile(selectedTile)

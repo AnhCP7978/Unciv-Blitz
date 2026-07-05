@@ -17,6 +17,7 @@ import com.unciv.logic.multiplayer.SimultaneousTurnState
 import com.unciv.logic.automation.civilization.BarbarianManager
 import com.unciv.logic.city.City
 import com.unciv.logic.civilization.*
+import com.unciv.logic.map.mapunit.MapUnit // Only for simultaneous: getUnitById()
 import com.unciv.logic.civilization.managers.TechManager
 import com.unciv.logic.civilization.managers.TurnManager
 import com.unciv.logic.civilization.managers.VictoryManager
@@ -79,7 +80,6 @@ import java.util.*
  * .. which will crash later (when readFields actually assigns it) - unless the interface actually was `List`.
  */
 interface IsPartOfGameInfoSerialization
-
 
 data class VictoryData(
     val winningCiv: String,
@@ -242,6 +242,10 @@ class GameInfo : IsPartOfGameInfoSerialization, HasGameInfoSerializationVersion 
     @Readonly
     fun getCivilizationOrNull(civID: String) = civMap[civID]
         ?: civilizations.firstOrNull { it.civID == civID }
+
+    /** Resolve a unit by its globally unique id across all civilizations. (Only use for Simultaneous mode for now) */
+    @Readonly
+    fun getUnitById(unitId: Int): MapUnit? = civilizations.asSequence().flatMap { it.units.getCivUnits() }.firstOrNull { it.id == unitId }
 
     fun getCurrentPlayerCivilization() = currentPlayerCiv
     fun getCivilizationsAsPreviews() = civilizations.map { it.asPreview() }.toMutableList()

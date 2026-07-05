@@ -125,7 +125,7 @@ class PromotionPickerScreen private constructor(
         if (unit.civ.gameInfo.gameParameters.isSimultaneousGame) {
             for (promotionName in promotionNames) {
                 com.unciv.UncivGame.Current.worldScreen?.actionBroadcastManager
-                    ?.sendPromoteAction(unit.id, promotionName, unit.civ.civName)
+                    ?.sendPromoteAction(unit.id, promotionName)
             }
             onChange?.invoke()
             game.popScreen()

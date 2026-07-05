@@ -156,8 +156,7 @@ class CityScreenTileTable(private val cityScreen: CityScreen) : Table() {
                 if (worldScreen != null &&
                     SimultaneousModeInterceptor.interceptBuyTile(
                         worldScreen, city.id,
-                        tile.position.x, tile.position.y,
-                        city.civ.civName)
+                        tile.position.x, tile.position.y)
                     ) continue
                 city.expansion.buyTile(tile)
             }

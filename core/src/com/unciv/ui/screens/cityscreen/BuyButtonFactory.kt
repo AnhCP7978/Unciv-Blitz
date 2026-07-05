@@ -174,11 +174,7 @@ class BuyButtonFactory(val cityScreen: CityScreen) {
                 worldScreen,
                 construction.name,
                 cityScreen.city.id,
-                queuePosition,
                 stat.name,
-                tile?.position?.x,
-                tile?.position?.y,
-                cityScreen.city.civ.civName,
             )) return
 
         SoundPlayer.play(stat.purchaseSound)

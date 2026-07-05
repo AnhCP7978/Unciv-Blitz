@@ -99,12 +99,7 @@ class TradePopup(worldScreen: WorldScreen) : Popup(worldScreen) {
         }.row()
 
         addButton("Not this time.", 'n') {
-            if (viewingCiv.gameInfo.gameParameters.isSimultaneousGame) {
-                worldScreen.actionBroadcastManager
-                    ?.sendDeclineTradeRequestAction(trade, requestingCiv.civName, viewingCiv.civName)
-            } else {
-                tradeRequest.decline(viewingCiv)
-            }
+            tradeRequest.decline(viewingCiv)
             close()
             requestingCiv.addNotification("[${viewingCiv.civName}] has denied your trade request", NotificationCategory.Trade, viewingCiv.civName, NotificationIcon.Trade)
             worldScreen.shouldUpdate = true

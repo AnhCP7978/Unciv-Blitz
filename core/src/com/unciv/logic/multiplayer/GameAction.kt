@@ -4,37 +4,73 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
- * Actions a player can perform in simultaneous multiplayer mode.
- * Sent from client → host via WebSocket, then relayed by host → all.
- */
+ *  Actions a player can perform in simultaneous multiplayer mode.
+ *  Sent from client → host via WebSocket, then relayed by host → all.
+*/
 @Serializable
-sealed class GameAction {
-    abstract val civName: String
+sealed interface GameAction {
+    // ═══════════════════════════════════════════
+    //  Unit actions
+    //  unitId is globally unique
+    // ═══════════════════════════════════════════
 
     @Serializable
     @SerialName("move")
     data class MoveAction(
         val unitId: Int,
         val toX: Int,
-        val toY: Int,
-        override val civName: String,
-    ) : GameAction()
+        val toY: Int
+    ) : GameAction
 
     @Serializable
     @SerialName("attack")
     data class AttackAction(
         val unitId: Int,
-        val targetTileX: Int,
-        val targetTileY: Int,
-        override val civName: String,
-    ) : GameAction()
+        val targetX: Int,
+        val targetY: Int
+    ) : GameAction
 
     @Serializable
-    @SerialName("foundCity")
-    data class FoundCityAction(
+    @SerialName("promote")
+    data class PromoteAction(
         val unitId: Int,
-        override val civName: String,
-    ) : GameAction()
+        val promotionName: String
+    ) : GameAction
+
+    /*  Unit-destroying actions (unit is consumed/destroyed):
+     *  Disband, FoundCity, FoundReligion, EnhanceReligion, HurryResearch/Policy/Wonder/Building, ConductTradeMission, etc. */
+    @Serializable
+    @SerialName("consumeUnit")
+    data class ConsumeUnitAction(
+        val unitId: Int,
+        val actionType: String
+    ) : GameAction
+    /*  Unit state-change actions (unit survives, state modified):
+     *  Fortify, Pillage, Upgrade, etc.
+     *  Could be merged into consumeUnit somehow? For now keep it as currently then. */
+    @Serializable
+    @SerialName("updateUnit")
+    data class UpdateUnitAction(
+        val unitId: Int,
+        val actionType: String,
+        /** e.g. upgrade target unit name for "Upgrade" action */
+        val param: String? = null,
+    ) : GameAction
+    /*  Create a tile improvement (work boat / work folk).
+     *  Consumes the unit after applying the improvement.
+     *  Could have been folded into [ConsumeUnitAction] with an extra param,
+     *  but kept separate so improvementName has a dedicated non-nullable field. */
+    @Serializable
+    @SerialName("createImprovement")
+    data class CreateImprovementAction(
+        val unitId: Int,
+        val improvementName: String
+    ) : GameAction
+
+    // ═══════════════════════════════════════════
+    //  City actions
+    //  cityId is globally unique UUID
+    // ═══════════════════════════════════════════
 
     @Serializable
     @SerialName("buyTile")
@@ -42,15 +78,7 @@ sealed class GameAction {
         val cityId: String,
         val tileX: Int,
         val tileY: Int,
-        override val civName: String,
-    ) : GameAction()
-
-    @Serializable
-    @SerialName("declareWar")
-    data class DeclareWarAction(
-        val otherCivName: String,
-        override val civName: String,
-    ) : GameAction()
+    ) : GameAction
 
     @Serializable
     @SerialName("cityBombard")
@@ -58,124 +86,110 @@ sealed class GameAction {
         val cityId: String,
         val targetTileX: Int,
         val targetTileY: Int,
-        override val civName: String,
-    ) : GameAction()
-
-    @Serializable
-    @SerialName("greatPerson")
-    data class GreatPersonAction(
-        val unitId: Int,
-        val actionType: String, // "HurryResearch", "HurryPolicy", "HurryWonder", "HurryBuilding", "ConstructImprovement", "ConductTradeMission"
-        override val civName: String,
-    ) : GameAction()
-
-    @Serializable
-    @SerialName("upgrade")
-    data class UpgradeAction(
-        val unitId: Int,
-        val upgradeToUnitName: String,
-        override val civName: String,
-    ) : GameAction()
-
-    @Serializable
-    @SerialName("promote")
-    data class PromoteAction(
-        val unitId: Int,
-        val promotionName: String,
-        override val civName: String,
-    ) : GameAction()
+    ) : GameAction
 
     @Serializable
     @SerialName("purchase")
     data class PurchaseAction(
         val constructionName: String,
         val cityId: String,
-        val queuePosition: Int = -1,
-        val stat: String,   // "Gold" or "Faith"
-        val tileX: Int? = null,
-        val tileY: Int? = null,
-        override val civName: String,
-    ) : GameAction()
+        val stat: String, // "Gold" or "Faith" — the stat used to pay. Since each construction actually store its cost, could we remove this?
+    ) : GameAction
+
+    // ═══════════════════════════════════════════
+    //  Diplomacy actions (warfare, city capture)
+    // ═══════════════════════════════════════════
 
     @Serializable
-    @SerialName("fortify")
-    data class FortifyAction(
-        val unitId: Int,
-        val fortifyType: String, // "Fortify" or "FortifyUntilHealed"
-        override val civName: String,
-    ) : GameAction()
+    @SerialName("declareWar")
+    data class DeclareWarAction(
+        val civName: String,
+        val otherCivName: String,
+    ) : GameAction
+
+    @Serializable
+    @SerialName("captureCity")
+    data class CaptureCityAction(
+        val cityId: String,
+        val civName: String, // conquerer civName
+    ) : GameAction
+
+    // ═══════════════════════════════════════════
+    //  Civ-scoped actions (no entity ID)
+    // ═══════════════════════════════════════════
 
     @Serializable
     @SerialName("endTurn")
     data class EndTurnAction(
-        override val civName: String,
-    ) : GameAction()
+        val civName: String,
+    ) : GameAction
 
     @Serializable
     @SerialName("turnAdvanced")
     data class TurnAdvanced(
         val newTurns: Int,
         val gameId: String,
-        override val civName: String = "",
-    ) : GameAction()
-
-    @Serializable
-    @SerialName("pillage")
-    data class PillageAction(
-        val unitId: Int,
-        override val civName: String,
-    ) : GameAction()
+        val civName: String = "",
+    ) : GameAction
 
     @Serializable
     @SerialName("adoptPolicy")
     data class AdoptPolicyAction(
         val policyName: String,
-        override val civName: String,
-    ) : GameAction()
-
-    @Serializable
-    @SerialName("disbandUnit")
-    data class DisbandUnitAction(
-        val unitId: Int,
-        override val civName: String,
-    ) : GameAction()
+        val civName: String,
+    ) : GameAction
 
     @Serializable
     @SerialName("foundPantheon")
     data class FoundPantheonAction(
         val beliefName: String,
-        override val civName: String,
-    ) : GameAction()
+        val civName: String,
+    ) : GameAction
 
     @Serializable
-    @SerialName("createImprovement")
-    data class CreateImprovementAction(
-        val unitId: Int,
-        val improvementName: String,
-        override val civName: String,
-    ) : GameAction()
+    @SerialName("spawnUnit")
+    data class SpawnUnitAction(
+        val unitName: String,
+        val cityId: String?,
+        val civName: String,
+    ) : GameAction
 
-    // ──────────────────────────────────────
-    //  Trade / Diplomacy actions
-    // ──────────────────────────────────────
+    // ═══════════════════════════════════════════
+    //  Religion actions
+    // ═══════════════════════════════════════════
 
+    /* This one fired after player finish creating their religion with beliefs -> broadcast to others */
+    @Serializable
+    @SerialName("completeFoundReligion")
+    data class CompleteFoundReligionAction(
+        val civName: String,
+        val displayName: String,
+        val religionName: String,
+        val beliefNames: List<String>,
+    ) : GameAction
+
+    /* This one fired after enhanced religion */
+    @Serializable
+    @SerialName("completeEnhanceReligion")
+    data class CompleteEnhanceReligionAction(
+        val civName: String,
+        val beliefNames: List<String>,
+    ) : GameAction
+
+    // ═══════════════════════════════════════════
+    //  Trade actions (civName computed from actor field)
+    // ═══════════════════════════════════════════
+
+    /* When a trade deal get send, we broadcast SendTradeRequestAction
+     * If it get accepted, we broadcast the trade result, if rejected/re-negotiated: continue */
     @Serializable
     @SerialName("sendTradeRequest")
     data class SendTradeRequestAction(
         val requestingCiv: String,
         val targetCiv: String,
         val trade: TradeData,
-    ) : GameAction() {
-        override val civName: String get() = requestingCiv
-    }
-
-    @Serializable
-    @SerialName("retractTradeRequest")
-    data class RetractTradeRequestAction(
-        val requestingCiv: String,
-        val targetCiv: String,
-    ) : GameAction() {
-        override val civName: String get() = requestingCiv
+    ) : GameAction {
+        val civName: String get() = requestingCiv
     }
 
     @Serializable
@@ -184,53 +198,44 @@ sealed class GameAction {
         val acceptingCiv: String,
         val requestingCiv: String,
         val trade: TradeData,
-    ) : GameAction() {
-        override val civName: String get() = acceptingCiv
+    ) : GameAction {
+        val civName: String get() = acceptingCiv
     }
 
-    @Serializable
-    @SerialName("declineTradeRequest")
-    data class DeclineTradeRequestAction(
-        val decliningCiv: String,
-        val requestingCiv: String,
-        val trade: TradeData,
-    ) : GameAction() {
-        override val civName: String get() = decliningCiv
-    }
-
-    // ──────────────────────────────────────
+    // ═══════════════════════════════════════════
     //  City-State interaction actions
-    // ──────────────────────────────────────
+    // ═══════════════════════════════════════════
 
+    /* civName here refer to the civ that interact with cityStateCivName */
     @Serializable
     @SerialName("tributeGold")
     data class TributeGoldAction(
         val cityStateCivName: String,
-        override val civName: String,
-    ) : GameAction()
+        val civName: String,
+    ) : GameAction
 
     @Serializable
     @SerialName("tributeWorker")
     data class TributeWorkerAction(
         val cityStateCivName: String,
-        override val civName: String,
-    ) : GameAction()
+        val civName: String,
+    ) : GameAction
 
     @Serializable
     @SerialName("goldGift")
     data class GoldGiftAction(
         val cityStateCivName: String,
         val giftAmount: Int,
-        override val civName: String,
-    ) : GameAction()
+        val civName: String,
+    ) : GameAction
 
     @Serializable
     @SerialName("setProtection")
     data class SetProtectionAction(
         val cityStateCivName: String,
-        val protect: Boolean, // true=pledge, false=revoke
-        override val civName: String,
-    ) : GameAction()
+        val protect: Boolean,
+        val civName: String,
+    ) : GameAction
 
     @Serializable
     @SerialName("giftImprovement")
@@ -239,73 +244,39 @@ sealed class GameAction {
         val tileX: Int,
         val tileY: Int,
         val improvementName: String,
-        override val civName: String,
-    ) : GameAction()
+        val civName: String,
+    ) : GameAction
 
     @Serializable
     @SerialName("diplomaticMarriage")
     data class DiplomaticMarriageAction(
         val cityStateCivName: String,
-        override val civName: String,
-    ) : GameAction()
+        val civName: String,
+    ) : GameAction
 
-    // ──────────────────────────────────────
-    //  Religion actions
-    // ──────────────────────────────────────
-
-    @Serializable
-    @SerialName("foundReligion")
-    data class FoundReligionAction(
-        val unitId: Int,
-        override val civName: String,
-    ) : GameAction()
+    // ═══════════════════════════════════════════
+    //  Data classes shared by trade actions
+    // ═══════════════════════════════════════════
 
     @Serializable
-    @SerialName("enhanceReligion")
-    data class EnhanceReligionAction(
-        val unitId: Int,
-        override val civName: String,
-    ) : GameAction()
+    data class TradeOfferData(
+        val name: String,
+        val type: String,
+        val amount: Int = 1,
+        val duration: Int,
+    )
 
     @Serializable
-    @SerialName("completeFoundReligion")
-    data class CompleteFoundReligionAction(
-        override val civName: String,
-        val displayName: String,
-        val religionName: String,
-        val beliefNames: List<String>,
-    ) : GameAction()
-
-    @Serializable
-    @SerialName("completeEnhanceReligion")
-    data class CompleteEnhanceReligionAction(
-        override val civName: String,
-        val beliefNames: List<String>,
-    ) : GameAction()
+    data class TradeData(
+        val theirOffers: List<TradeOfferData> = emptyList(),
+        val ourOffers: List<TradeOfferData> = emptyList(),
+    )
 }
-
-// ──────────────────────────────────────
-//  Serializable trade data classes
-// ──────────────────────────────────────
-
-@Serializable
-data class TradeOfferData(
-    val name: String,
-    val type: String, // TradeOfferType.name
-    val amount: Int = 1,
-    val duration: Int,
-)
-
-@Serializable
-data class TradeData(
-    val theirOffers: List<TradeOfferData> = emptyList(),
-    val ourOffers: List<TradeOfferData> = emptyList(),
-)
 
 /**
  * Wrapper sent over the wire so the recipient knows which game this belongs to.
- * Non-host send packet (validated=false) to server -> relay to host
- * Host send packet (validated=true) -> broadcast to all except host
+ * Non-host sends packet (validated=false) to server → relay to host.
+ * Host sends packet (validated=true) → broadcast to all except host.
 */
 @Serializable
 data class GameActionPacket(val gameId: String, val action: GameAction, val validated: Boolean = false)

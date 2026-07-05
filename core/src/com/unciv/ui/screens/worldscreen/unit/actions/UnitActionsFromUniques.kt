@@ -318,7 +318,7 @@ object UnitActionsFromUniques {
             action = {
                 if (unit.civ.gameInfo.gameParameters.isSimultaneousGame) {
                     com.unciv.UncivGame.Current.worldScreen?.actionBroadcastManager
-                        ?.sendCreateImprovementAction(unit.id, improvement.name, unit.civ.civName)
+                        ?.sendCreateImprovementAction(unit.id, improvement.name)
                     Unit // If you delete, you get "Argument type mismatch: actual type is 'Function0<Unit?>?', but 'Function0<Unit>?' was expected."
                 } else {
                     tile.setImprovement(improvement, unit.civ, unit)
@@ -359,7 +359,7 @@ object UnitActionsFromUniques {
                     action = {
                         if (unit.civ.gameInfo.gameParameters.isSimultaneousGame) {
                             com.unciv.UncivGame.Current.worldScreen?.actionBroadcastManager
-                                ?.sendCreateImprovementAction(unit.id, improvement.name, unit.civ.civName)
+                                ?.sendCreateImprovementAction(unit.id, improvement.name)
                             Unit
                         } else {
                             val unitTile = unit.getTile()

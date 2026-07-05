@@ -240,7 +240,7 @@ object UnitActions {
                     ConfirmPopup(worldScreen, disbandText, "Disband unit") {
                         if (unit.civ.gameInfo.gameParameters.isSimultaneousGame) {
                             worldScreen.actionBroadcastManager
-                                ?.sendDisbandUnitAction(unit.id, unit.civ.civName)
+                                ?.sendConsumeUnitAction(unit.id, "DisbandUnit")
                         } else {
                             unit.disband()
                             unit.civ.updateStatsForNextTurn() // less upkeep!
