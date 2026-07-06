@@ -107,6 +107,23 @@ object SimultaneousModeInterceptor {
                 return ({})  // block ALL players — apply only via broadcast echo
             }
 
+            // ── Religion actions (unit survives, tile/city state changes) ──
+            UnitActionType.SpreadReligion -> {
+                broadcastManager.sendUpdateUnitAction(unit.id, "SpreadReligion")
+                return ({})
+            }
+            UnitActionType.RemoveHeresy -> {
+                broadcastManager.sendUpdateUnitAction(unit.id, "RemoveHeresy")
+                return ({})
+            }
+
+            // ── Generic unique-trigger actions (Enter Golden Age, stat bulbs, etc.) ──
+            UnitActionType.TriggerUnique -> {
+                val uniqueText = action.associatedUnique?.text ?: return null
+                broadcastManager.sendTriggerUnitAction(unit.id, uniqueText)
+                return ({})
+            }
+
             else -> return null  // don't intercept other actions
         }
     }

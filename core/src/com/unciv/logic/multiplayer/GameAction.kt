@@ -67,6 +67,16 @@ sealed interface GameAction {
         val improvementName: String
     ) : GameAction
 
+    /*  Activate a unit's unique ability (Enter Golden Age, stat bulbs, etc.).
+     *  The uniqueText carries the triggered unique's rule text so the host
+     *  can re-derive the trigger function and execute it authoritatively. */
+    @Serializable
+    @SerialName("triggerUnit")
+    data class TriggerUnitAction(
+        val unitId: Int,
+        val uniqueText: String,
+    ) : GameAction
+
     // ═══════════════════════════════════════════
     //  City actions
     //  cityId is globally unique UUID

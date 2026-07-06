@@ -2,31 +2,35 @@ package com.unciv.logic.multiplayer
 
 import com.badlogic.gdx.Gdx
 import com.unciv.UncivGame
+import com.unciv.ui.screens.worldscreen.WorldScreen
+import com.unciv.ui.screens.worldscreen.unit.actions.UnitActions
+import com.unciv.ui.screens.worldscreen.unit.actions.UnitActionsPillage
+import com.unciv.ui.screens.worldscreen.unit.actions.UnitActionsReligion
+import com.unciv.ui.screens.worldscreen.bottombar.BattleTableHelpers.battleAnimationDeferred
+import com.unciv.utils.debug
+import com.unciv.utils.Concurrency
+import com.unciv.logic.map.tile.Tile
+import com.unciv.logic.map.mapunit.MapUnit
+import com.unciv.logic.trade.Trade
+import com.unciv.logic.trade.TradeOffer
+import com.unciv.logic.trade.TradeOfferType
+import com.unciv.logic.trade.TradeLogic
+import com.unciv.logic.trade.TradeRequest
 import com.unciv.logic.battle.Battle
 import com.unciv.logic.battle.CityCombatant
 import com.unciv.logic.battle.ICombatant
 import com.unciv.logic.battle.AttackableTile
 import com.unciv.logic.battle.MapUnitCombatant
 import com.unciv.logic.battle.TargetHelper
-import com.unciv.logic.civilization.PlayerType
-import com.unciv.logic.map.mapunit.MapUnit
-import com.unciv.logic.map.tile.Tile
-import com.unciv.logic.multiplayer.chat.ChatWebSocket
-import com.unciv.logic.multiplayer.chat.ChatStore
 import com.unciv.logic.multiplayer.chat.Response
-import com.unciv.models.stats.Stat
-import com.unciv.ui.screens.worldscreen.WorldScreen
-import com.unciv.utils.Concurrency
-import com.unciv.utils.debug
-import com.unciv.models.ruleset.INonPerpetualConstruction
+import com.unciv.logic.multiplayer.chat.ChatStore
+import com.unciv.logic.multiplayer.chat.ChatWebSocket
+import com.unciv.logic.civilization.PlayerType
 import com.unciv.logic.civilization.managers.ReligionState
+import com.unciv.models.stats.Stat
 import com.unciv.models.ruleset.Belief
-import com.unciv.ui.screens.worldscreen.bottombar.BattleTableHelpers.battleAnimationDeferred
-import com.unciv.logic.trade.Trade
-import com.unciv.logic.trade.TradeOffer
-import com.unciv.logic.trade.TradeOfferType
-import com.unciv.logic.trade.TradeLogic
-import com.unciv.logic.trade.TradeRequest
+import com.unciv.models.ruleset.INonPerpetualConstruction
+import com.unciv.models.UnitActionType
 import kotlinx.serialization.json.Json
 import kotlin.math.roundToInt
 
@@ -106,6 +110,7 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
             is GameAction.ConsumeUnitAction -> applyRemoteConsumeUnit(action)
             is GameAction.UpdateUnitAction -> applyRemoteUpdateUnit(action)
             is GameAction.CreateImprovementAction -> applyRemoteCreateImprovement(action)
+            is GameAction.TriggerUnitAction -> applyRemoteTriggerUnit(action)
             is GameAction.BuyTileAction -> applyRemoteBuyTile(action)
             is GameAction.CityBombardAction -> applyRemoteCityBombard(action)
             is GameAction.PurchaseAction -> applyRemotePurchase(action)
@@ -162,6 +167,9 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
 
     fun sendCreateImprovementAction(unitId: Int, improvementName: String) =
         sendGameAction(GameAction.CreateImprovementAction(unitId, improvementName))
+
+    fun sendTriggerUnitAction(unitId: Int, uniqueText: String) =
+        sendGameAction(GameAction.TriggerUnitAction(unitId, uniqueText))
 
     fun sendPurchaseAction(constructionName: String, cityId: String, stat: String) =
         sendGameAction(GameAction.PurchaseAction(constructionName, cityId, stat))
@@ -426,6 +434,15 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
                 }
                 debug("Applying remote create improvement: %s", action.improvementName)
                 applyRemoteCreateImprovement(action)
+            }
+            is GameAction.TriggerUnitAction -> {
+                if (!packet.validated) {
+                    if (isHost()) hostValidateTriggerUnit(packet)
+                    return
+                }
+                debug("Applying remote trigger unit: unit %s unique %s",
+                    action.unitId, action.uniqueText)
+                applyRemoteTriggerUnit(action)
             }
             is GameAction.SpawnUnitAction -> {
                 if (!packet.validated) {
@@ -748,16 +765,17 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
         return when (action.actionType) {
             "FoundCity" -> {
                 val tile = unit.currentTile
-                if (tile.isCityCenter()) return false
-                if (!tile.canBeSettled(unit.civ)) return false
+                if (tile.isCityCenter() || !tile.canBeSettled(unit.civ)) return false
                 unit.civ.addCity(tile.position, unit)
                 unit.destroy()
                 true
             }
-            "HurryResearch" -> { hurryResearchEffect(unit); unit.consume(); true }
-            "HurryPolicy" -> { hurryPolicyEffect(unit); unit.consume(); true }
-            "HurryWonder", "HurryBuilding" -> { hurryWonderOrBuildingEffect(unit); unit.consume(); true }
-            "ConductTradeMission" -> { tradeMissionEffect(unit); unit.consume(); true }
+            // Delegate to original game logic — no manual reimplementation
+            "HurryResearch" -> UnitActions.invokeUnitAction(unit, UnitActionType.HurryResearch)
+            "HurryPolicy" -> UnitActions.invokeUnitAction(unit, UnitActionType.HurryPolicy)
+            "HurryWonder" -> UnitActions.invokeUnitAction(unit, UnitActionType.HurryWonder)
+            "HurryBuilding" -> UnitActions.invokeUnitAction(unit, UnitActionType.HurryBuilding)
+            "ConductTradeMission" -> UnitActions.invokeUnitAction(unit, UnitActionType.ConductTradeMission)
             "DisbandUnit" -> {
                 unit.disband()
                 unit.civ.updateStatsForNextTurn()
@@ -804,44 +822,10 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
             "Fortify" -> { unit.fortify(); true }
             "FortifyUntilHealed" -> { unit.fortifyUntilHealed(); true }
             "Pillage" -> {
-                if (!unit.hasMovement()) return false
                 val tile = unit.currentTile
                 if (!tile.canPillageTile() || tile.getImprovementToPillageName() == null) return false
-                val pillagedImprovement = tile.getImprovementToPillageName() ?: return false
-                val pillagingImprovement = tile.canPillageTileImprovement()
-                val pillageText = "An enemy [${unit.baseUnit.name}] has pillaged our [$pillagedImprovement]"
-                val icon = "ImprovementIcons/$pillagedImprovement"
-                tile.getOwner()?.addNotification(
-                    pillageText,
-                    tile.position,
-                    com.unciv.logic.civilization.NotificationCategory.War,
-                    icon,
-                    com.unciv.logic.civilization.NotificationIcon.War,
-                    unit.baseUnit.name
-                )
-                com.unciv.ui.screens.worldscreen.unit.actions.UnitActionsPillage.pillageLooting(tile, unit)
-                tile.setPillaged()
-                if (tile.resource != null) tile.getOwner()?.cache?.updateCivResources()
-                val freePillage = unit.hasUnique(
-                    com.unciv.models.ruleset.unique.UniqueType.NoMovementToPillage,
-                    checkCivInfoUniques = true
-                )
-                if (!freePillage) unit.useMovementPoints(1f)
-                if (pillagingImprovement) {
-                    var healAmount = 25f
-                    for (unique in unit.getMatchingUniques(
-                        com.unciv.models.ruleset.unique.UniqueType.PercentHealthFromPillaging,
-                        checkCivInfoUniques = true
-                    )) {
-                        healAmount *= unique.params[0].toFloat() / 100f
-                    }
-                    unit.healBy(healAmount.toInt())
-                }
-                if (tile.getImprovementToPillage()
-                        ?.hasUnique(com.unciv.models.ruleset.unique.UniqueType.DestroyedWhenPillaged) == true
-                ) {
-                    tile.removeImprovement()
-                }
+                val pillageAction = UnitActionsPillage.getPillageAction(unit, tile)?.action ?: return false
+                pillageAction()
                 true
             }
             "Upgrade" -> {
@@ -851,6 +835,20 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
                 if (!unit.upgrade.canUpgrade(unitToUpgradeTo = upgradedUnit)) return false
                 if (unit.civ.gold < unit.upgrade.getCostOfUpgrade(upgradedUnit)) return false
                 unit.upgrade.performUpgrade(upgradedUnit, isFree = false)
+                true
+            }
+            "SpreadReligion" -> {
+                val tile = unit.currentTile
+                val spreadReligion = UnitActionsReligion.getSpreadReligionActions(unit, tile)
+                    .firstOrNull()?.action ?: return false
+                spreadReligion()
+                true
+            }
+            "RemoveHeresy" -> {
+                val tile = unit.currentTile
+                val removeHeresy = UnitActionsReligion.getRemoveHeresyActions(unit, tile)
+                    .firstOrNull()?.action ?: return false
+                removeHeresy()
                 true
             }
             else -> false
@@ -872,42 +870,40 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
         Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
     }
 
-    // ──────────────────────────────────────
-    //  Great Person effect helpers (used by ConsumeUnit)
-    // ──────────────────────────────────────
+    // ════════════════════════════════════════
+    //  TriggerUnit — generic unique activation
+    // ════════════════════════════════════════
 
-    private fun hurryResearchEffect(unit: MapUnit) {
-        val civ = unit.civ
-        civ.tech.addScience(civ.tech.getScienceFromGreatScientist())
-    }
-
-    private fun hurryPolicyEffect(unit: MapUnit) {
-        unit.civ.policies.addCulture(unit.civ.policies.getCultureFromGreatWriter())
-    }
-
-    private fun hurryWonderOrBuildingEffect(unit: MapUnit) {
+    private fun hostValidateTriggerUnit(envelope: GameActionPacket) {
+        val action = envelope.action as? GameAction.TriggerUnitAction ?: return
+        val unit = findUnitById(action.unitId) ?: return
+        if (unit.isDestroyed) return
+        // Find the unique by matching its text against all unit uniques
+        val unique = unit.getUniques().firstOrNull { it.text == action.uniqueText } ?: return
         val tile = unit.currentTile
-        if (!tile.isCityCenter()) return
-        val city = tile.getCity() ?: return
-        val production = ((300 + 30 * city.population.population) * unit.civ.gameInfo.speed.productionCostModifier).toInt()
-        city.cityConstructions.addProductionPoints(production)
-        city.cityConstructions.constructIfEnough()
+        val gameContext = com.unciv.models.ruleset.unique.GameContext(unit.civ, null, unit, tile)
+        val triggerFunction = com.unciv.models.ruleset.unique.UniqueTriggerActivation
+            .getTriggerFunction(unique, unit.civ, unit = unit, tile = tile) ?: return
+        repeat(unique.getUniqueMultiplier(gameContext)) { triggerFunction.invoke() }
+        com.unciv.ui.screens.worldscreen.unit.actions.UnitActionModifiers.activateSideEffects(unit, unique)
+        val validatedEnvelope = envelope.copy(validated = true)
+        ChatWebSocket.requestMessageSend(
+            com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
+        )
+        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
     }
 
-    private fun tradeMissionEffect(unit: MapUnit) {
+    private fun applyRemoteTriggerUnit(action: GameAction.TriggerUnitAction) {
+        val unit = findUnitById(action.unitId) ?: return
+        if (unit.isDestroyed) return
+        val unique = unit.getUniques().firstOrNull { it.text == action.uniqueText } ?: return
         val tile = unit.currentTile
-        val targetCiv = tile.owningCity?.civ ?: return
-        if (!targetCiv.isCityState) return
-        var goldEarned = (350 + 50 * unit.civ.getEraNumber()) * unit.civ.gameInfo.speed.goldCostModifier
-        var influenceEarned = 0f
-        for (goldUnique in unit.getMatchingUniques(
-            com.unciv.models.ruleset.unique.UniqueType.PercentGoldFromTradeMissions,
-            checkCivInfoUniques = true)) {
-            goldEarned *= (1 + goldUnique.params[0].toFloat() / 100)
-            influenceEarned = goldUnique.params[0].toFloat()
-        }
-        unit.civ.addGold(goldEarned.toInt())
-        targetCiv.getDiplomacyManager(unit.civ)?.addInfluence(influenceEarned)
+        val gameContext = com.unciv.models.ruleset.unique.GameContext(unit.civ, null, unit, tile)
+        val triggerFunction = com.unciv.models.ruleset.unique.UniqueTriggerActivation
+            .getTriggerFunction(unique, unit.civ, unit = unit, tile = tile) ?: return
+        repeat(unique.getUniqueMultiplier(gameContext)) { triggerFunction.invoke() }
+        com.unciv.ui.screens.worldscreen.unit.actions.UnitActionModifiers.activateSideEffects(unit, unique)
+        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
     }
 
     /** Get the [ICombatant] on a tile for city bombardment target resolution */
