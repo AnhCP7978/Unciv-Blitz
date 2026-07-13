@@ -11,6 +11,13 @@ import com.unciv.utils.debug
 import com.unciv.utils.Concurrency
 import com.unciv.logic.map.tile.Tile
 import com.unciv.logic.map.mapunit.MapUnit
+import com.unciv.logic.civilization.LocationAction
+import com.unciv.logic.civilization.DiplomacyAction
+import com.unciv.logic.civilization.CivilopediaAction
+import com.unciv.logic.civilization.NotificationCategory
+import com.unciv.logic.civilization.NotificationIcon
+import com.unciv.logic.civilization.diplomacy.DiplomaticModifiers
+import com.unciv.logic.battle.BattleUnitCapture
 import com.unciv.logic.trade.Trade
 import com.unciv.logic.trade.TradeOffer
 import com.unciv.logic.trade.TradeOfferType
@@ -164,6 +171,9 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
 
     fun sendPromoteAction(unitId: Int, promotionName: String) =
         sendGameAction(GameAction.PromoteAction(unitId, promotionName))
+
+    fun sendReturnCapturedUnitAction(unitId: Int, returnToOwner: Boolean) =
+        sendGameAction(GameAction.ReturnCapturedUnitAction(unitId, returnToOwner))
 
     fun sendCreateImprovementAction(unitId: Int, improvementName: String) =
         sendGameAction(GameAction.CreateImprovementAction(unitId, improvementName))
@@ -570,6 +580,15 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
                     action.cityId, action.civName)
                 applyRemoteCaptureCity(action)
             }
+            is GameAction.ReturnCapturedUnitAction -> {
+                if (!packet.validated) {
+                    if (isHost()) hostValidateReturnCapturedUnit(packet)
+                    return
+                }
+                debug("Applying remote return captured unit: unit %s returnToOwner=%s",
+                    action.unitId, action.returnToOwner)
+                applyRemoteReturnCapturedUnit(action)
+            }
             else -> {}
         }
     }
@@ -953,6 +972,60 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
             }
             "Liberate" -> city.liberateCity(conquerer)
             "Destroy" -> city.destroyCity(true)
+        }
+        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
+    }
+
+    // ════════════════════════════════════════
+    //  Return Captured Unit (barbarian settler rescue)
+    // ════════════════════════════════════════
+
+    private fun hostValidateReturnCapturedUnit(envelope: GameActionPacket) {
+        val action = envelope.action as? GameAction.ReturnCapturedUnitAction ?: return
+        val unit = findUnitById(action.unitId) ?: return
+        if (unit.isDestroyed) return
+        if (unit.originalOwningCiv == null) return
+        applyRemoteReturnCapturedUnit(action)
+        val validatedEnvelope = envelope.copy(validated = true)
+        ChatWebSocket.requestMessageSend(
+            com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
+        )
+    }
+
+    private fun applyRemoteReturnCapturedUnit(action: GameAction.ReturnCapturedUnitAction) {
+        val unit = findUnitById(action.unitId) ?: return
+        if (unit.isDestroyed) return
+        val tile = unit.currentTile
+        val captor = unit.civ
+
+        if (action.returnToOwner) {
+            val originalOwner = unit.originalOwningCiv ?: return
+            val unitName = unit.baseUnit.name
+            unit.destroy()
+            val closestCity = originalOwner.cities.minByOrNull { it.getCenterTile().aerialDistanceTo(tile) }
+            if (closestCity != null) {
+                originalOwner.units.placeUnitNearTile(closestCity.location.toHexCoord(), unitName)
+            }
+            if (originalOwner.isCityState) {
+                originalOwner.getDiplomacyManagerOrMeet(captor).addInfluence(45f)
+            } else if (originalOwner.isMajorCiv()) {
+                originalOwner.getDiplomacyManagerOrMeet(captor)
+                    .setModifier(DiplomaticModifiers.ReturnedCapturedUnits, 20f)
+            }
+            val notificationSequence = sequence {
+                yield(LocationAction(tile.position))
+                if (closestCity != null)
+                    yield(LocationAction(closestCity.location))
+                yield(DiplomacyAction(captor))
+                yield(CivilopediaAction("Tutorial/Barbarians"))
+            }
+            originalOwner.addNotification(
+                "Your captured [${unitName}] has been returned by [${captor.civName}]",
+                notificationSequence, NotificationCategory.Diplomacy,
+                NotificationIcon.Trade, unitName, captor.civName
+            )
+        } else {
+            BattleUnitCapture.captureOrConvertToWorker(unit, captor)
         }
         Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
     }

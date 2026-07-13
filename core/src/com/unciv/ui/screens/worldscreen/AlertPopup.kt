@@ -448,6 +448,7 @@ class AlertPopup(
         bottomTable.defaults().pad(0f, 30f) // Small buttons, plenty of pad so we don't fat-finger it
 
         addCloseButton(Constants.yes, KeyboardBinding.Confirm) {
+            if (SimultaneousModeInterceptor.interceptReturnCapturedUnit(worldScreen, capturedUnit.id, true)) return@addCloseButton
             // Return it to original owner
             val unitName = capturedUnit.baseUnit.name
             capturedUnit.destroy()
@@ -475,6 +476,7 @@ class AlertPopup(
             originalOwner.addNotification("Your captured [${unitName}] has been returned by [${captor.civName}]", notificationSequence, NotificationCategory.Diplomacy, NotificationIcon.Trade, unitName, captor.civName)
         }
         addCloseButton(Constants.no, KeyboardBinding.Cancel) {
+            if (SimultaneousModeInterceptor.interceptReturnCapturedUnit(worldScreen, capturedUnit.id, false)) return@addCloseButton
             // Take it for ourselves
             BattleUnitCapture.captureOrConvertToWorker(capturedUnit, captor)
         }

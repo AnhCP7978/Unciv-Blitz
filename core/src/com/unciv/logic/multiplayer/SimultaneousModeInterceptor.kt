@@ -246,4 +246,17 @@ object SimultaneousModeInterceptor {
         broadcastManager.sendSpawnUnitAction(unitName, cityId, civName)
         return true
     }
+
+    /** Intercept a recaptured civilian decision (return to original owner or keep as worker). */
+    fun interceptReturnCapturedUnit(
+        worldScreen: WorldScreen,
+        unitId: Int,
+        returnToOwner: Boolean,
+    ): Boolean {
+        val gameInfo = worldScreen.gameInfo
+        if (!gameInfo.gameParameters.isSimultaneousGame) return false
+        val broadcastManager = worldScreen.actionBroadcastManager ?: return false
+        broadcastManager.sendReturnCapturedUnitAction(unitId, returnToOwner)
+        return true
+    }
 }

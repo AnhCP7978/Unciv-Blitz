@@ -37,6 +37,13 @@ sealed interface GameAction {
         val promotionName: String
     ) : GameAction
 
+    @Serializable
+    @SerialName("returnCapturedUnit")
+    data class ReturnCapturedUnitAction(
+        val unitId: Int,
+        val returnToOwner: Boolean
+    ) : GameAction
+
     /*  Unit-destroying actions (unit is consumed/destroyed):
      *  Disband, FoundCity, FoundReligion, EnhanceReligion, HurryResearch/Policy/Wonder/Building, ConductTradeMission, etc. */
     @Serializable
