@@ -1,6 +1,7 @@
 package com.unciv.ui.screens.pickerscreens
 
 import com.unciv.UncivGame
+import com.unciv.logic.multiplayer.GameAction
 import com.unciv.logic.civilization.Civilization
 import com.unciv.models.ruleset.Belief
 import com.unciv.models.ruleset.BeliefType
@@ -33,7 +34,7 @@ class PantheonPickerScreen(
 
         setOKAction("Choose a pantheon") {
             if (gameInfo.gameParameters.isSimultaneousGame)
-                UncivGame.Current.worldScreen?.actionBroadcastManager?.sendFoundPantheonAction(selectedPantheon!!.name, choosingCiv.civName)
+                UncivGame.Current.worldScreen?.actionBroadcastManager?.sendGameAction(GameAction.FoundPantheonAction(selectedPantheon!!.name, choosingCiv.civName))
             else
                 chooseBeliefs(listOf(selectedPantheon!!), useFreeBeliefs = usingFreeBeliefs())
         }

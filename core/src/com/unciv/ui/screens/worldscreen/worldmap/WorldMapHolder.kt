@@ -257,7 +257,7 @@ class WorldMapHolder(
                     .firstOrNull { it.tileToAttack == tile }
             if (unit.canAttack() && attackableTile != null) {
                 /** ****** Right-click Attack ****** */
-                if (SimultaneousModeInterceptor.interceptAttack(worldScreen, unit.id, attackableTile.tileToAttack)) return
+                if (SimultaneousModeInterceptor.interceptAttack(unit.id, attackableTile.tileToAttack)) return
                 val attacker = MapUnitCombatant(unit)
                 if (!Battle.movePreparingAttack(attacker, attackableTile)) return
                 if (!SoundPlayer.play(UncivSound(attacker.getName())))
@@ -282,8 +282,7 @@ class WorldMapHolder(
 
     internal fun moveUnitToTargetTile(selectedUnits: List<MapUnit>, targetTile: Tile) {
         // Simultaneous multiplayer: route through broadcast manager instead of local execution
-        if (SimultaneousModeInterceptor.interceptMove(worldScreen, selectedUnits.first(), targetTile))
-            return
+        if (SimultaneousModeInterceptor.interceptMove(selectedUnits.first(), targetTile)) return
 
         // this can take a long time, because of the unit-to-tile calculation needed, so we put it in a different thread
         // THIS PART IS REALLY ANNOYING

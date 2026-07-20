@@ -8,6 +8,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label
 import com.badlogic.gdx.scenes.scene2d.ui.Table
 import com.badlogic.gdx.utils.Align
 import com.unciv.UncivGame // Only for simultaneous mode
+import com.unciv.logic.multiplayer.GameAction
 import com.unciv.Constants
 import com.unciv.GUI
 import com.unciv.logic.civilization.Civilization
@@ -121,7 +122,7 @@ class TechPickerScreen(
             if (!researchableTechs.contains(freeTech)) return
             if (civInfo.gameInfo.gameParameters.isSimultaneousGame) {
                 UncivGame.Current.worldScreen?.actionBroadcastManager
-                    ?.sendChooseFreeTechAction(freeTech, civInfo.civName)
+                    ?.sendGameAction(GameAction.ChooseFreeTechAction(freeTech, civInfo.civName))
                 // Decrement locally so the picker doesn't re-open before the echo arrives
                 civTech.freeTechs--
             } else {

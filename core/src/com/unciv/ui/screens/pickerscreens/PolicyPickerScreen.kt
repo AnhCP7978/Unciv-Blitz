@@ -9,6 +9,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Image
 import com.badlogic.gdx.scenes.scene2d.ui.Table
 import com.badlogic.gdx.utils.Align
 import com.unciv.logic.civilization.Civilization
+import com.unciv.logic.multiplayer.GameAction
 import com.unciv.models.TutorialTrigger
 import com.unciv.models.UncivSound
 import com.unciv.models.ruleset.Policy
@@ -668,7 +669,7 @@ class PolicyPickerScreen(
 
         if (viewingCiv.gameInfo.gameParameters.isSimultaneousGame) {
             com.unciv.UncivGame.Current.worldScreen?.actionBroadcastManager
-                ?.sendAdoptPolicyAction(policy.name, viewingCiv.civName)
+                ?.sendGameAction(GameAction.AdoptPolicyAction(policy.name, viewingCiv.civName))
             game.popScreen()
         } else {
             viewingCiv.policies.adopt(policy)

@@ -11,6 +11,8 @@ import com.unciv.ui.components.extensions.isEnabled
 import com.unciv.ui.components.extensions.toTextButton
 import com.unciv.ui.components.input.onClick
 import com.unciv.ui.screens.basescreen.BaseScreen
+import com.unciv.logic.multiplayer.GameAction
+import com.unciv.logic.multiplayer.toTradeData
 
 class TradeTable(
     private val civ: Civilization,
@@ -76,8 +78,8 @@ class TradeTable(
 
             if (civ.gameInfo.gameParameters.isSimultaneousGame) {
                 com.unciv.UncivGame.Current.worldScreen?.actionBroadcastManager
-                    ?.sendSendTradeRequestAction(
-                        tradeLogic.currentTrade.reverse(), otherCivilization.civName, civ.civName
+                    ?.sendGameAction(
+                        GameAction.SendTradeRequestAction(otherCivilization.civName, civ.civName, tradeLogic.currentTrade.reverse().toTradeData())
                     )
             } else {
                 otherCivilization.tradeRequests.add(TradeRequest(civ.civID, tradeLogic.currentTrade.reverse()))

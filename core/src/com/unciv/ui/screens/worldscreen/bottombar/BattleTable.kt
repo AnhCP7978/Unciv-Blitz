@@ -46,7 +46,6 @@ import kotlin.math.max
 import kotlin.math.roundToInt
 
 class BattleTable(val worldScreen: WorldScreen) : Table() {
-
     init {
         isVisible = false
         skin = BaseScreen.skin
@@ -337,23 +336,24 @@ class BattleTable(val worldScreen: WorldScreen) : Table() {
         // My tests (desktop only) show the red-flash animations look just fine without.
         worldScreen.shouldUpdate = true
         worldScreen.clearUndoCheckpoints()
-        //Gdx.graphics.requestRendering()  // Use this if immediate rendering is required
+        //Gdx.graphics.requestRendering() // Use this if immediate rendering is required
 
         if (!canStillAttack) return
         if (!SoundPlayer.play(UncivSound(attacker.getName())))
             SoundPlayer.play(attacker.getAttackSound())
 
-        if (attacker is MapUnitCombatant && SimultaneousModeInterceptor.interceptAttack(worldScreen, attacker.unit.id, attackableTile.tileToAttack)) return
-        if (attacker is CityCombatant && SimultaneousModeInterceptor.interceptCityBombard(
-                worldScreen, attacker.city.id, attackableTile.tileToAttack
-            )) return
+        val attackerId = when (attacker) {
+            is MapUnitCombatant -> attacker.unit.id
+            is CityCombatant -> attacker.city.id
+            else -> null
+        }
+        if (attackerId != null && SimultaneousModeInterceptor.interceptAttack(attackerId, attackableTile.tileToAttack)) return
 
         val (damageToDefender, damageToAttacker) = Battle.attackOrNuke(attacker, attackableTile)
 
         worldScreen.battleAnimationDeferred(attacker, damageToAttacker, defender, damageToDefender)
         if (!attacker.canAttack()) hide()
     }
-
 
     private fun simulateNuke(attacker: MapUnitCombatant, targetTile: Tile) {
         clear()

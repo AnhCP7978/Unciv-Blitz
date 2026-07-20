@@ -6,6 +6,8 @@ import com.unciv.UncivGame
 import com.unciv.logic.civilization.NotificationCategory
 import com.unciv.logic.civilization.NotificationIcon
 import com.unciv.logic.trade.TradeLogic
+import com.unciv.logic.multiplayer.GameAction
+import com.unciv.logic.multiplayer.toTradeData
 import com.unciv.logic.trade.TradeOffer
 import com.unciv.logic.trade.TradeOfferType
 import com.unciv.models.translations.tr
@@ -87,7 +89,7 @@ class TradePopup(worldScreen: WorldScreen) : Popup(worldScreen) {
         addButton("Sounds good!", 'y') {
             if (viewingCiv.gameInfo.gameParameters.isSimultaneousGame) {
                 worldScreen.actionBroadcastManager
-                    ?.sendAcceptTradeAction(trade, requestingCiv.civName, viewingCiv.civName)
+                    ?.sendGameAction(GameAction.AcceptTradeAction(viewingCiv.civName, requestingCiv.civName, trade.toTradeData()))
             } else {
                 val tradeLogic = TradeLogic(viewingCiv, requestingCiv)
                 tradeLogic.currentTrade.set(trade)

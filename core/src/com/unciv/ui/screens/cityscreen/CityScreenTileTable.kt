@@ -151,13 +151,11 @@ class CityScreenTileTable(private val cityScreen: CityScreen) : Table() {
             for (tile in getRing(ring)) {
                 if (!city.expansion.canBuyTile(tile))
                     break
-                // Simultaneous multiplayer: route through host-authoritative broadcast
-                val worldScreen = com.unciv.GUI.getWorldScreen()
-                if (worldScreen != null &&
-                    SimultaneousModeInterceptor.interceptBuyTile(
-                        worldScreen, city.id,
-                        tile.position.x, tile.position.y)
-                    ) continue
+
+                if (SimultaneousModeInterceptor.interceptBuyTile(
+                    city.id,
+                    tile.position.x, tile.position.y)
+                ) continue
                 city.expansion.buyTile(tile)
             }
             SoundPlayer.play(Stat.Gold.purchaseSound)

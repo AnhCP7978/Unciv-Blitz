@@ -3,7 +3,6 @@ package com.unciv.ui.screens.cityscreen
 import com.badlogic.gdx.graphics.Color
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton
 import com.unciv.Constants
-import com.unciv.GUI
 import com.unciv.logic.city.CityConstructions
 import com.unciv.logic.map.tile.Tile
 import com.unciv.logic.multiplayer.SimultaneousModeInterceptor
@@ -169,13 +168,11 @@ class BuyButtonFactory(val cityScreen: CityScreen) {
     ) {
         // Simultaneous multiplayer: route purchase through host-authoritative broadcast
         val queuePosition = cityScreen.selectedQueueEntry
-        val worldScreen = GUI.getWorldScreen()
         if (SimultaneousModeInterceptor.interceptPurchase(
-                worldScreen,
-                construction.name,
-                cityScreen.city.id,
-                stat.name,
-            )) return
+            construction.name,
+            cityScreen.city.id,
+            stat.name,
+        )) return
 
         SoundPlayer.play(stat.purchaseSound)
         val city = cityScreen.city
@@ -202,5 +199,4 @@ class BuyButtonFactory(val cityScreen: CityScreen) {
         cityScreen.city.reassignPopulation()
         cityScreen.update()
     }
-
 }

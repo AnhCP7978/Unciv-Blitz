@@ -1,262 +1,154 @@
 package com.unciv.logic.multiplayer
 
+import com.unciv.GUI
 import com.unciv.logic.map.mapunit.MapUnit
 import com.unciv.logic.map.tile.Tile
+
 import com.unciv.models.UnitAction
 import com.unciv.models.UnitActionType
 import com.unciv.models.UpgradeUnitAction
-import com.unciv.ui.screens.worldscreen.WorldScreen
 
 /** Lightweight hook that intercepts unit actions in simultaneous multiplayer mode.
- * Non-host players have their actions routed through the [ActionBroadcastManager]
- * instead of executing locally.
- *
- * The host applies actions immediately and broadcasts the result. */
+ * Called before a unit move is executed locally.
+ * @return true if the action was intercepted successfully
+*/
 object SimultaneousModeInterceptor {
-    /** Called before a unit move is executed locally.
-     * @return true if the action was intercepted (broadcast mode) — caller should skip local execution */
-    fun interceptMove(
-        worldScreen: WorldScreen,
-        unit: MapUnit,
-        targetTile: Tile,
-    ): Boolean {
-        val gameInfo = worldScreen.gameInfo
-        if (!gameInfo.gameParameters.isSimultaneousGame) return false
-
-        val broadcastManager = worldScreen.actionBroadcastManager ?: return false
-        // Calculate the reachable tile this turn instead of sending the final far-away destination
-        val tileToMoveTo = try {
-            unit.movement.getTileToMoveToThisTurn(targetTile)
-        } catch (_: Exception) {
-            return false // Cancel the move if nothing reachable this turn
-        }
-
-        broadcastManager.sendMoveAction(
-            unitId = unit.id,
-            toX = tileToMoveTo.position.x, toY = tileToMoveTo.position.y,
-        )
-        return !broadcastManager.isHost() // Let host execute locally
+    // Shared function to check if using Simultaneous mode and grab actionBroadcastManager
+    private fun getBroadcastManager(): ActionBroadcastManager? {
+        val worldScreen = GUI.getWorldScreen()
+        if (!worldScreen.gameInfo.gameParameters.isSimultaneousGame) return null
+        return worldScreen.actionBroadcastManager
     }
 
-    /** Intercept a unit action (found city, etc).
-     * The caller should return the replacement action (wrapped in broadcast)
-     * or null to continue with original action.
-     *
-     * Host: sends validated=true and lets local execution proceed (returns null).
-     * Non-host: sends validated=false and blocks (returns {}). */
-    fun interceptUnitAction(
-        worldScreen: WorldScreen,
-        unit: MapUnit,
-        action: UnitAction,
-        originalAction: () -> Unit,
-    ): (() -> Unit)? {
-        val gameInfo = worldScreen.gameInfo
-        if (!gameInfo.gameParameters.isSimultaneousGame) return null
+    fun interceptMove(unit: MapUnit, targetTile: Tile): Boolean {
+        val broadcastManager = getBroadcastManager() ?: return false
+        try {
+            // Calculate the reachable tile this turn (If choose a far away tile, we send this turn destination tile instead)
+            val tileToMoveTo = unit.movement.getTileToMoveToThisTurn(targetTile)
 
-        val broadcastManager = worldScreen.actionBroadcastManager ?: return null
-        val isHost = broadcastManager.isHost()
+            broadcastManager.sendGameAction(
+                GameAction.MoveAction(unit.id, tileToMoveTo.position.x, tileToMoveTo.position.y)
+            )
+            return true
+        } catch (_: Exception) {
+            return false // Cancel the move (if nothing reachable this turn?)
+        }
+    }
+
+    // Use for both unit fight & city bombardment
+    fun interceptAttack(attackerId: Any, targetTile: Tile): Boolean {
+        val broadcastManager = getBroadcastManager() ?: return false
+
+        when (attackerId) {
+            is Int -> {
+                broadcastManager.sendGameAction(
+                    GameAction.UnitAttackAction(attackerId, targetTile.position.x, targetTile.position.y)
+                )
+                return true
+            }
+            is String -> {
+                broadcastManager.sendGameAction(
+                    GameAction.CityAttackAction(attackerId, targetTile.position.x, targetTile.position.y)
+                )
+                return true
+            }
+            else -> { return false }
+        }
+    }
+
+    fun interceptUnitAction(unit: MapUnit, action: UnitAction): Boolean {
+        val broadcastManager = getBroadcastManager() ?: return false
 
         when (action.type) {
-            // ── Unit-consumed actions (unit is destroyed/consumed) ──
-            UnitActionType.FoundCity -> {
-                broadcastManager.sendConsumeUnitAction(unit.id, "FoundCity")
-                return ({})
-            }
-            UnitActionType.HurryResearch -> {
-                broadcastManager.sendConsumeUnitAction(unit.id, "HurryResearch")
-                return if (isHost) null else ({})
-            }
-            UnitActionType.HurryPolicy -> {
-                broadcastManager.sendConsumeUnitAction(unit.id, "HurryPolicy")
-                return if (isHost) null else ({})
-            }
-            UnitActionType.HurryWonder,
-            UnitActionType.HurryBuilding -> {
-                broadcastManager.sendConsumeUnitAction(unit.id, "HurryWonder")
-                return if (isHost) null else ({})
-            }
-            UnitActionType.ConductTradeMission -> {
-                broadcastManager.sendConsumeUnitAction(unit.id, "ConductTradeMission")
-                return if (isHost) null else ({})
-            }
-            UnitActionType.FoundReligion -> {
-                broadcastManager.sendConsumeUnitAction(unit.id, "FoundReligion")
-                return ({})
-            }
-            UnitActionType.EnhanceReligion -> {
-                broadcastManager.sendConsumeUnitAction(unit.id, "EnhanceReligion")
-                return ({})
-            }
-
-            // ── Unit-update actions (unit survives) ──
             UnitActionType.Upgrade -> {
-                val upgradeAction = action as? com.unciv.models.UpgradeUnitAction ?: return null
-                broadcastManager.sendUpdateUnitAction(unit.id, "Upgrade", upgradeAction.unitToUpgradeTo.name)
-                return if (isHost) null else ({})
+                broadcastManager.sendGameAction(
+                    GameAction.UpgradeUnitAction(unit.id, (action as UpgradeUnitAction).unitToUpgradeTo.name)
+                )
             }
-            UnitActionType.Fortify -> {
-                broadcastManager.sendUpdateUnitAction(unit.id, "Fortify")
-                return if (isHost) null else ({})
-            }
-            UnitActionType.FortifyUntilHealed -> {
-                broadcastManager.sendUpdateUnitAction(unit.id, "FortifyUntilHealed")
-                return if (isHost) null else ({})
-            }
-            UnitActionType.Pillage -> {
-                broadcastManager.sendUpdateUnitAction(unit.id, "Pillage")
-                return ({})  // block ALL players — apply only via broadcast echo
-            }
-
-            // ── Religion actions (unit survives, tile/city state changes) ──
-            UnitActionType.SpreadReligion -> {
-                broadcastManager.sendUpdateUnitAction(unit.id, "SpreadReligion")
-                return ({})
-            }
-            UnitActionType.RemoveHeresy -> {
-                broadcastManager.sendUpdateUnitAction(unit.id, "RemoveHeresy")
-                return ({})
-            }
-
             // ── Generic unique-trigger actions (Enter Golden Age, stat bulbs, etc.) ──
             UnitActionType.TriggerUnique -> {
-                val uniqueText = action.associatedUnique?.text ?: return null
-                broadcastManager.sendTriggerUnitAction(unit.id, uniqueText)
-                return ({})
+                val uniqueText = action.associatedUnique?.text ?: return false
+                broadcastManager.sendGameAction(
+                    GameAction.TriggerUniqueAction(unit.id, uniqueText)
+                )
             }
-
-            else -> return null  // don't intercept other actions
+            // Generic actions (pillage, fortify, disband, ...)
+            else -> {
+                broadcastManager.sendGameAction(
+                    GameAction.InvokeUnitAction(unit.id, action.type)
+                )
+            }
         }
-    }
-
-    /** Intercept a purchase action (buying construction in a city).
-     * @return true if the action was intercepted — caller should skip local execution */
-    fun interceptPurchase(
-        worldScreen: WorldScreen,
-        constructionName: String,
-        cityId: String,
-        stat: String,
-    ): Boolean {
-        val gameInfo = worldScreen.gameInfo
-        if (!gameInfo.gameParameters.isSimultaneousGame) return false
-        val broadcastManager = worldScreen.actionBroadcastManager ?: return false
-
-        broadcastManager.sendPurchaseAction(constructionName, cityId, stat)
         return true
     }
 
-    /** Intercept a buy-tile action. Both host and non-host block local execution. */
-    fun interceptBuyTile(
-        worldScreen: WorldScreen,
-        cityId: String,
-        tileX: Int,
-        tileY: Int,
-    ): Boolean {
-        val gameInfo = worldScreen.gameInfo
-        if (!gameInfo.gameParameters.isSimultaneousGame) return false
-        val broadcastManager = worldScreen.actionBroadcastManager ?: return false
-        broadcastManager.sendBuyTileAction(cityId, tileX, tileY)
-        return true
-    }
-
-    /** Intercept a city bombardment action. Both host and non-host block local execution. */
-    fun interceptCityBombard(
-        worldScreen: WorldScreen,
-        cityId: String,
-        targetTile: Tile,
-    ): Boolean {
-        val gameInfo = worldScreen.gameInfo
-        if (!gameInfo.gameParameters.isSimultaneousGame) return false
-        val broadcastManager = worldScreen.actionBroadcastManager ?: return false
-
-        broadcastManager.sendCityBombardAction(
-            cityId = cityId,
-            targetTileX = targetTile.position.x,
-            targetTileY = targetTile.position.y,
+    // Intercept an unit promotion
+    fun interceptPromote(unitId: Int, promotionName: String): Boolean {
+        val broadcastManager = getBroadcastManager() ?: return false
+        broadcastManager.sendGameAction(
+            GameAction.PromoteAction(unitId, promotionName)
         )
         return true
     }
 
-    /** Intercept a declare war action. Returns true if the action was intercepted. */
-    fun interceptDeclareWar(
-        worldScreen: WorldScreen,
-        civName: String,
-        otherCivName: String,
-    ): Boolean {
-        val gameInfo = worldScreen.gameInfo
-        if (!gameInfo.gameParameters.isSimultaneousGame) return false
-        val broadcastManager = worldScreen.actionBroadcastManager ?: return false
-
-        broadcastManager.sendDeclareWarAction(civName, otherCivName)
-        return true
-    }
-
-    /** Intercept an attack action. Both host and non-host block local execution. */
-    fun interceptAttack(
-        worldScreen: WorldScreen,
-        unitId: Int,
-        targetTile: com.unciv.logic.map.tile.Tile,
-    ): Boolean {
-        val gameInfo = worldScreen.gameInfo
-        if (!gameInfo.gameParameters.isSimultaneousGame) return false
-        val broadcastManager = worldScreen.actionBroadcastManager ?: return false
-
-        broadcastManager.sendAttackAction(
-            unitId = unitId,
-            targetX = targetTile.position.x,
-            targetY = targetTile.position.y,
+    fun interceptCreateImprovement(unitId: Int, improvementName: String): Boolean {
+        val broadcastManager = getBroadcastManager() ?: return false
+        broadcastManager.sendGameAction(
+            GameAction.CreateImprovementAction(unitId, improvementName)
         )
         return true
     }
 
-    /** Intercept a unit promotion. Both host and non-host block local execution. */
-    fun interceptPromote(
-        worldScreen: WorldScreen,
-        unitId: Int,
-        promotionName: String,
-    ): Boolean {
-        val gameInfo = worldScreen.gameInfo
-        if (!gameInfo.gameParameters.isSimultaneousGame) return false
-        val broadcastManager = worldScreen.actionBroadcastManager ?: return false
-        broadcastManager.sendPromoteAction(unitId, promotionName)
+    // Intercept a purchase action (buying building/unit in city)
+    fun interceptPurchase(constructionName: String, cityId: String, stat: String): Boolean {
+        val broadcastManager = getBroadcastManager() ?: return false
+        broadcastManager.sendGameAction(
+            GameAction.PurchaseAction(constructionName, cityId, stat)
+        )
         return true
     }
 
-    /** Intercept a disband action. */
-    fun interceptDisbandUnit(
-        worldScreen: WorldScreen,
-        unitId: Int,
-    ): Boolean {
-        val gameInfo = worldScreen.gameInfo
-        if (!gameInfo.gameParameters.isSimultaneousGame) return false
-        val broadcastManager = worldScreen.actionBroadcastManager ?: return false
-        broadcastManager.sendConsumeUnitAction(unitId, "DisbandUnit")
+    // Intercept a city buy tile action
+    fun interceptBuyTile(cityId: String, tileX: Int, tileY: Int): Boolean {
+        val broadcastManager = getBroadcastManager() ?: return false
+        broadcastManager.sendGameAction(
+            GameAction.BuyTileAction(cityId, tileX, tileY)
+        )
         return true
     }
 
-    /** Intercept a spawn unit action (great person picker). */
+    // Intercept a declare war action
+    fun interceptDeclareWar(civName: String, otherCivName: String): Boolean {
+        val broadcastManager = getBroadcastManager() ?: return false
+        broadcastManager.sendGameAction(
+            GameAction.DeclareWarAction(civName, otherCivName)
+        )
+        return true
+    }
+
+    // Intercept a spawn unit action (great person picker)
     fun interceptSpawnUnit(
-        worldScreen: WorldScreen,
         unitName: String,
         cityId: String?,
         civName: String,
+        freeGreatPeopleDecrement: Int = 0,
+        mayaLimitedFreeGPDecrement: Int = 0,
+        longCountGPPoolRemoval: List<String> = emptyList(),
     ): Boolean {
-        val gameInfo = worldScreen.gameInfo
-        if (!gameInfo.gameParameters.isSimultaneousGame) return false
-        val broadcastManager = worldScreen.actionBroadcastManager ?: return false
-        broadcastManager.sendSpawnUnitAction(unitName, cityId, civName)
+        val broadcastManager = getBroadcastManager() ?: return false
+        broadcastManager.sendGameAction(
+            GameAction.SpawnUnitAction(unitName, cityId, civName,
+                freeGreatPeopleDecrement, mayaLimitedFreeGPDecrement, longCountGPPoolRemoval)
+        )
         return true
     }
 
-    /** Intercept a recaptured civilian decision (return to original owner or keep as worker). */
-    fun interceptReturnCapturedUnit(
-        worldScreen: WorldScreen,
-        unitId: Int,
-        returnToOwner: Boolean,
-    ): Boolean {
-        val gameInfo = worldScreen.gameInfo
-        if (!gameInfo.gameParameters.isSimultaneousGame) return false
-        val broadcastManager = worldScreen.actionBroadcastManager ?: return false
-        broadcastManager.sendReturnCapturedUnitAction(unitId, returnToOwner)
+    // Intercept a recaptured civilian decision (return to original owner or keep as worker)
+    fun interceptReturnCapturedUnit(unitId: Int, returnToOwner: Boolean): Boolean {
+        val broadcastManager = getBroadcastManager() ?: return false
+        broadcastManager.sendGameAction(
+            GameAction.ReturnCapturedUnitAction(unitId, returnToOwner)
+        )
         return true
     }
 }

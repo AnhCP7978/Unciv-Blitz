@@ -3,6 +3,7 @@ package com.unciv.ui.screens.worldscreen.unit.actions
 import com.unciv.Constants
 import com.unciv.GUI
 import com.unciv.UncivGame
+import com.unciv.logic.multiplayer.SimultaneousModeInterceptor
 import com.unciv.logic.civilization.Civilization
 import com.unciv.logic.civilization.PlayerType
 import com.unciv.logic.civilization.diplomacy.DiplomacyFlags
@@ -316,10 +317,8 @@ object UnitActionsFromUniques {
 
         return UnitAction(UnitActionType.CreateImprovement, useFrequency, "Create [${improvement.name}]",
             action = {
-                if (unit.civ.gameInfo.gameParameters.isSimultaneousGame) {
-                    com.unciv.UncivGame.Current.worldScreen?.actionBroadcastManager
-                        ?.sendCreateImprovementAction(unit.id, improvement.name)
-                    Unit // If you delete, you get "Argument type mismatch: actual type is 'Function0<Unit?>?', but 'Function0<Unit>?' was expected."
+                if (SimultaneousModeInterceptor.interceptCreateImprovement(unit.id, improvement.name)) {
+                    Unit // If you delete this, you get "Argument type mismatch: actual type is 'Function0<Unit?>?', but 'Function0<Unit>?' was expected."
                 } else {
                     tile.setImprovement(improvement, unit.civ, unit)
                     unit.destroy() // Modders may wish for a nondestructive way, but that should be another Unique
@@ -357,10 +356,8 @@ object UnitActionsFromUniques {
                     ),
                     associatedUnique = unique,
                     action = {
-                        if (unit.civ.gameInfo.gameParameters.isSimultaneousGame) {
-                            com.unciv.UncivGame.Current.worldScreen?.actionBroadcastManager
-                                ?.sendCreateImprovementAction(unit.id, improvement.name)
-                            Unit
+                        if (SimultaneousModeInterceptor.interceptCreateImprovement(unit.id, improvement.name)) {
+                            Unit // Same as above
                         } else {
                             val unitTile = unit.getTile()
                             unitTile.setImprovement(improvement, unit.civ, unit)
@@ -528,14 +525,16 @@ object UnitActionsFromUniques {
 
     // Public - used in WorkerAutomation
     fun getRepairAction(unit: MapUnit) : UnitAction? {
-        if (!unit.currentTile.ruleset.tileImprovements.containsKey(Constants.repair)) return null
-        if (!unit.cache.hasUniqueToBuildImprovements) return null
-        if (unit.isEmbarked()) return null
+        if (
+            !unit.currentTile.ruleset.tileImprovements.containsKey(Constants.repair) || 
+            !unit.cache.hasUniqueToBuildImprovements ||
+            unit.isEmbarked()
+        ) return null
+
         val tile = unit.getTile()
-        if (tile.isCityCenter()) return null
-        if (!tile.isPillaged()) return null
-        val unique = unit.getMatchingUniques(UniqueType.BuildImprovements).firstOrNull()
-            ?: return null
+        if (tile.isCityCenter() || !tile.isPillaged()) return null
+
+        val unique = unit.getMatchingUniques(UniqueType.BuildImprovements).firstOrNull() ?: return null
 
         val couldConstruct = unit.hasMovement()
             && !tile.isCityCenter() && tile.improvementInProgress != Constants.repair

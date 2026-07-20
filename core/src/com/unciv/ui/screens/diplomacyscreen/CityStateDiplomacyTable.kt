@@ -30,6 +30,8 @@ import com.unciv.ui.components.input.onClick
 import com.unciv.ui.components.widgets.ColorMarkupLabel
 import com.unciv.ui.images.ImageGetter
 import com.unciv.ui.popups.ConfirmPopup
+import com.unciv.logic.multiplayer.GameAction
+import com.unciv.logic.multiplayer.toTradeData
 
 class CityStateDiplomacyTable(private val diplomacyScreen: DiplomacyScreen) {
     val viewingCiv = diplomacyScreen.viewingCiv
@@ -211,7 +213,7 @@ class CityStateDiplomacyTable(private val diplomacyScreen: DiplomacyScreen) {
             ConfirmPopup(diplomacyScreen, "Revoke protection for [${otherCiv.civName}]?", "Revoke Protection") {
                 if (viewingCiv.gameInfo.gameParameters.isSimultaneousGame) {
                     UncivGame.Current.worldScreen?.actionBroadcastManager
-                        ?.sendSetProtectionAction(otherCiv.civName, false, viewingCiv.civName)
+                        ?.sendGameAction(GameAction.SetProtectionAction(otherCiv.civName, false, viewingCiv.civName))
                 } else {
                     otherCiv.cityStateFunctions.removeProtectorCiv(viewingCiv)
                 }
@@ -235,7 +237,7 @@ class CityStateDiplomacyTable(private val diplomacyScreen: DiplomacyScreen) {
             ) {
                 if (viewingCiv.gameInfo.gameParameters.isSimultaneousGame) {
                     UncivGame.Current.worldScreen?.actionBroadcastManager
-                        ?.sendSetProtectionAction(otherCiv.civName, true, viewingCiv.civName)
+                        ?.sendGameAction(GameAction.SetProtectionAction(otherCiv.civName, true, viewingCiv.civName))
                 } else {
                     otherCiv.cityStateFunctions.addProtectorCiv(viewingCiv)
                 }
@@ -268,10 +270,8 @@ class CityStateDiplomacyTable(private val diplomacyScreen: DiplomacyScreen) {
                     TradeOffer(Constants.peaceTreaty, TradeOfferType.Treaty, speed = viewingCiv.gameInfo.speed)
                 )
                 if (viewingCiv.gameInfo.gameParameters.isSimultaneousGame) {
-                    com.unciv.UncivGame.Current.worldScreen?.actionBroadcastManager
-                        ?.sendAcceptTradeAction(
-                            tradeLogic.currentTrade, otherCiv.civName, viewingCiv.civName
-                        )
+                    UncivGame.Current.worldScreen?.actionBroadcastManager
+                        ?.sendGameAction(GameAction.AcceptTradeAction(viewingCiv.civName, otherCiv.civName, tradeLogic.currentTrade.toTradeData()))
                 } else {
                     tradeLogic.acceptTrade()
                 }
@@ -335,13 +335,13 @@ class CityStateDiplomacyTable(private val diplomacyScreen: DiplomacyScreen) {
             val newCities = otherCiv.cities
             if (viewingCiv.gameInfo.gameParameters.isSimultaneousGame) {
                 UncivGame.Current.worldScreen?.actionBroadcastManager
-                    ?.sendDiplomaticMarriageAction(otherCiv.civName, viewingCiv.civName)
+                    ?.sendGameAction(GameAction.DiplomaticMarriageAction(otherCiv.civName, viewingCiv.civName))
             } else {
                 otherCiv.cityStateFunctions.diplomaticMarriage(viewingCiv)
             }
-            UncivGame.Current.popScreen() // The other civ will no longer exist
+            UncivGame.Current.popScreen()
             for (city in newCities)
-                viewingCiv.popupAlerts.add(PopupAlert(AlertType.DiplomaticMarriage, city.id))   // Player gets to choose between annex and puppet
+                viewingCiv.popupAlerts.add(PopupAlert(AlertType.DiplomaticMarriage, city.id))
         }
         if (diplomacyScreen.isNotPlayersTurn() || !otherCiv.cityStateFunctions.canBeMarriedBy(viewingCiv))
             diplomaticMarriageButton.disable()
@@ -359,7 +359,7 @@ class CityStateDiplomacyTable(private val diplomacyScreen: DiplomacyScreen) {
             giftButton.onClick {
                 if (viewingCiv.gameInfo.gameParameters.isSimultaneousGame) {
                     UncivGame.Current.worldScreen?.actionBroadcastManager
-                        ?.sendGoldGiftAction(otherCiv.civName, giftAmount, viewingCiv.civName)
+                        ?.sendGameAction(GameAction.GoldGiftAction(otherCiv.civName, giftAmount, viewingCiv.civName))
                 } else {
                     otherCiv.cityStateFunctions.receiveGoldGift(viewingCiv, giftAmount)
                 }
@@ -404,7 +404,7 @@ class CityStateDiplomacyTable(private val diplomacyScreen: DiplomacyScreen) {
                     improveTileButton.onClick {
                         if (viewingCiv.gameInfo.gameParameters.isSimultaneousGame) {
                             UncivGame.Current.worldScreen?.actionBroadcastManager
-                                ?.sendGiftImprovementAction(otherCiv.civName, improvableTile.position.x, improvableTile.position.y, tileImprovement.name, viewingCiv.civName)
+                                ?.sendGameAction(GameAction.GiftImprovementAction(otherCiv.civName, improvableTile.position.x, improvableTile.position.y, tileImprovement.name, viewingCiv.civName))
                         } else {
                             viewingCiv.addGold(-200)
                             improvableTile.stopWorkingOnImprovement()
@@ -452,7 +452,7 @@ class CityStateDiplomacyTable(private val diplomacyScreen: DiplomacyScreen) {
         demandGoldButton.onClick {
             if (viewingCiv.gameInfo.gameParameters.isSimultaneousGame) {
                 UncivGame.Current.worldScreen?.actionBroadcastManager
-                    ?.sendTributeGoldAction(otherCiv.civName, viewingCiv.civName)
+                    ?.sendGameAction(GameAction.TakeTributeAction(otherCiv.civName, viewingCiv.civName, "Gold"))
             } else {
                 otherCiv.cityStateFunctions.tributeGold(viewingCiv)
             }
@@ -466,7 +466,7 @@ class CityStateDiplomacyTable(private val diplomacyScreen: DiplomacyScreen) {
         demandWorkerButton.onClick {
             if (viewingCiv.gameInfo.gameParameters.isSimultaneousGame) {
                 UncivGame.Current.worldScreen?.actionBroadcastManager
-                    ?.sendTributeWorkerAction(otherCiv.civName, viewingCiv.civName)
+                    ?.sendGameAction(GameAction.TakeTributeAction(otherCiv.civName, viewingCiv.civName, "Worker"))
             } else {
                 otherCiv.cityStateFunctions.tributeWorker(viewingCiv)
             }

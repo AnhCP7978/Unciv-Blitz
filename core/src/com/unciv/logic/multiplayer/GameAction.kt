@@ -1,5 +1,8 @@
 package com.unciv.logic.multiplayer
 
+import com.unciv.models.UnitActionType
+import com.unciv.models.stats.Stat
+
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -9,11 +12,6 @@ import kotlinx.serialization.Serializable
 */
 @Serializable
 sealed interface GameAction {
-    // ═══════════════════════════════════════════
-    //  Unit actions
-    //  unitId is globally unique
-    // ═══════════════════════════════════════════
-
     @Serializable
     @SerialName("move")
     data class MoveAction(
@@ -22,19 +20,59 @@ sealed interface GameAction {
         val toY: Int
     ) : GameAction
 
+    /* Attack */
     @Serializable
-    @SerialName("attack")
-    data class AttackAction(
+    @SerialName("unitAttack")
+    data class UnitAttackAction(
         val unitId: Int,
         val targetX: Int,
         val targetY: Int
     ) : GameAction
 
     @Serializable
+    @SerialName("cityAttack")
+    data class CityAttackAction(
+        val cityId: String,
+        val targetX: Int,
+        val targetY: Int
+    ) : GameAction
+
+    /* UnitAction */
+    @Serializable
+    @SerialName("invokeUnit")
+    data class InvokeUnitAction(
+        val unitId: Int,
+        val actionType: UnitActionType
+    ) : GameAction
+
+    @Serializable
+    @SerialName("upgradeUnit")
+    data class UpgradeUnitAction(
+        val unitId: Int,
+        val unitToUpgradeTo: String
+    ) : GameAction
+
+    @Serializable
+    @SerialName("triggerUnique")
+    data class TriggerUniqueAction(
+        val unitId: Int,
+        val uniqueText: String,
+    ) : GameAction
+
+    /* Promote */
+    @Serializable
     @SerialName("promote")
     data class PromoteAction(
         val unitId: Int,
         val promotionName: String
+    ) : GameAction
+
+    /*  Create a tile improvement (work boat / oil rig). Consumes the unit after applying the improvement */
+    @Serializable
+    @SerialName("createImprovement")
+    data class CreateImprovementAction(
+        val unitId: Int,
+        val improvementName: String
     ) : GameAction
 
     @Serializable
@@ -44,65 +82,16 @@ sealed interface GameAction {
         val returnToOwner: Boolean
     ) : GameAction
 
-    /*  Unit-destroying actions (unit is consumed/destroyed):
-     *  Disband, FoundCity, FoundReligion, EnhanceReligion, HurryResearch/Policy/Wonder/Building, ConductTradeMission, etc. */
-    @Serializable
-    @SerialName("consumeUnit")
-    data class ConsumeUnitAction(
-        val unitId: Int,
-        val actionType: String
-    ) : GameAction
-    /*  Unit state-change actions (unit survives, state modified):
-     *  Fortify, Pillage, Upgrade, etc.
-     *  Could be merged into consumeUnit somehow? For now keep it as currently then. */
-    @Serializable
-    @SerialName("updateUnit")
-    data class UpdateUnitAction(
-        val unitId: Int,
-        val actionType: String,
-        /** e.g. upgrade target unit name for "Upgrade" action */
-        val param: String? = null,
-    ) : GameAction
-    /*  Create a tile improvement (work boat / work folk).
-     *  Consumes the unit after applying the improvement.
-     *  Could have been folded into [ConsumeUnitAction] with an extra param,
-     *  but kept separate so improvementName has a dedicated non-nullable field. */
-    @Serializable
-    @SerialName("createImprovement")
-    data class CreateImprovementAction(
-        val unitId: Int,
-        val improvementName: String
-    ) : GameAction
-
-    /*  Activate a unit's unique ability (Enter Golden Age, stat bulbs, etc.).
-     *  The uniqueText carries the triggered unique's rule text so the host
-     *  can re-derive the trigger function and execute it authoritatively. */
-    @Serializable
-    @SerialName("triggerUnit")
-    data class TriggerUnitAction(
-        val unitId: Int,
-        val uniqueText: String,
-    ) : GameAction
-
     // ═══════════════════════════════════════════
     //  City actions
     //  cityId is globally unique UUID
     // ═══════════════════════════════════════════
-
     @Serializable
     @SerialName("buyTile")
     data class BuyTileAction(
         val cityId: String,
         val tileX: Int,
         val tileY: Int,
-    ) : GameAction
-
-    @Serializable
-    @SerialName("cityBombard")
-    data class CityBombardAction(
-        val cityId: String,
-        val targetTileX: Int,
-        val targetTileY: Int,
     ) : GameAction
 
     @Serializable
@@ -116,7 +105,6 @@ sealed interface GameAction {
     // ═══════════════════════════════════════════
     //  Diplomacy actions (warfare, city capture)
     // ═══════════════════════════════════════════
-
     @Serializable
     @SerialName("declareWar")
     data class DeclareWarAction(
@@ -135,7 +123,6 @@ sealed interface GameAction {
     // ═══════════════════════════════════════════
     //  Civ-scoped actions (no entity ID)
     // ═══════════════════════════════════════════
-
     @Serializable
     @SerialName("endTurn")
     data class EndTurnAction(
@@ -234,25 +221,19 @@ sealed interface GameAction {
     //  City-State interaction actions
     // ═══════════════════════════════════════════
 
-    /* civName here refer to the civ that interact with cityStateCivName */
+    /* civName here refer to the civ that interact with cityStateName */
     @Serializable
-    @SerialName("tributeGold")
-    data class TributeGoldAction(
-        val cityStateCivName: String,
+    @SerialName("takeTribute")
+    data class TakeTributeAction(
+        val cityStateName: String,
         val civName: String,
-    ) : GameAction
-
-    @Serializable
-    @SerialName("tributeWorker")
-    data class TributeWorkerAction(
-        val cityStateCivName: String,
-        val civName: String,
+        val tributeType: String // "Gold" or "Worker"
     ) : GameAction
 
     @Serializable
     @SerialName("goldGift")
     data class GoldGiftAction(
-        val cityStateCivName: String,
+        val cityStateName: String,
         val giftAmount: Int,
         val civName: String,
     ) : GameAction
@@ -260,7 +241,7 @@ sealed interface GameAction {
     @Serializable
     @SerialName("setProtection")
     data class SetProtectionAction(
-        val cityStateCivName: String,
+        val cityStateName: String,
         val protect: Boolean,
         val civName: String,
     ) : GameAction
@@ -268,7 +249,7 @@ sealed interface GameAction {
     @Serializable
     @SerialName("giftImprovement")
     data class GiftImprovementAction(
-        val cityStateCivName: String,
+        val cityStateName: String,
         val tileX: Int,
         val tileY: Int,
         val improvementName: String,
@@ -278,7 +259,7 @@ sealed interface GameAction {
     @Serializable
     @SerialName("diplomaticMarriage")
     data class DiplomaticMarriageAction(
-        val cityStateCivName: String,
+        val cityStateName: String,
         val civName: String,
     ) : GameAction
 

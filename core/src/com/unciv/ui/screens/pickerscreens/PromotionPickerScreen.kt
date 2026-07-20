@@ -13,6 +13,7 @@ import com.unciv.models.TutorialTrigger
 import com.unciv.models.UncivSound
 import com.unciv.models.ruleset.unit.Promotion
 import com.unciv.models.translations.tr
+import com.unciv.logic.multiplayer.SimultaneousModeInterceptor
 import com.unciv.ui.audio.SoundPlayer
 import com.unciv.ui.components.extensions.isEnabled
 import com.unciv.ui.components.extensions.toCheckBox
@@ -119,22 +120,16 @@ class PromotionPickerScreen private constructor(
         SoundPlayer.playRepeated(UncivSound.Promote, path.size.coerceAtMost(2))
 
         val promotionNames = path.map { it.name }
-
-        // In simultaneous multiplayer, skip local application to prevent double-apply
-        // (the broadcast echo will apply the promotion). Send the action first to pipeline.
-        if (unit.civ.gameInfo.gameParameters.isSimultaneousGame) {
-            for (promotionName in promotionNames) {
-                com.unciv.UncivGame.Current.worldScreen?.actionBroadcastManager
-                    ?.sendPromoteAction(unit.id, promotionName)
+        for (promotionName in promotionNames) {
+            // In simultaneous multiplayer, skip local application to prevent double-apply
+            if (SimultaneousModeInterceptor.interceptPromote(unit.id, promotionName)) {
+                onChange?.invoke()
+                game.popScreen()
+                return
             }
-            onChange?.invoke()
-            game.popScreen()
-            return
-        }
-
-        // Single player / non-simultaneous: apply locally
-        for (promotionName in promotionNames)
+            // Non-simultaneous: apply locally
             unit.promotions.addPromotion(promotionName)
+        }
 
         onChange?.invoke()
 

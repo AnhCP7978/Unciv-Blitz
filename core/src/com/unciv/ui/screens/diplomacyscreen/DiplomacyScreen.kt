@@ -317,10 +317,9 @@ class DiplomacyScreen(
         }
         declareWarButton.onClick {
             ConfirmPopup(this, getDeclareWarButtonText(otherCiv), "Declare war") {
-                val worldScreen = game.worldScreen
-                if (worldScreen != null && !SimultaneousModeInterceptor.interceptDeclareWar(worldScreen, viewingCiv.civName, otherCiv.civName)) {
-                    diplomacyManager.declareWar()
-                }
+                if (!SimultaneousModeInterceptor.interceptDeclareWar(viewingCiv.civName, otherCiv.civName))
+                    diplomacyManager.declareWar() // Apply locally if intercepting failed/is non-simultaneous mode
+
                 setRightSideFlavorText(otherCiv, otherCiv.nation.attacked, "Very well.")
                 updateLeftSideTable(otherCiv)
                 val music = UncivGame.Current.musicController

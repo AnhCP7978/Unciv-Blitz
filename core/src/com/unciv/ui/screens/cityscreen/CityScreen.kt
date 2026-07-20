@@ -447,11 +447,10 @@ class CityScreen(
         ) {
             // Simultaneous multiplayer: route through host-authoritative broadcast
             if (SimultaneousModeInterceptor.interceptBuyTile(
-                    GUI.getWorldScreen(),
-                    city.id,
-                    selectedTile.position.x,
-                    selectedTile.position.y
-                )) return@ConfirmPopup
+                city.id,
+                selectedTile.position.x,
+                selectedTile.position.y
+            )) return@ConfirmPopup
             SoundPlayer.play(UncivSound.Coin)
             city.expansion.buyTile(selectedTile)
             UncivGame.Current.replaceCurrentScreen(CityScreen(city, initSelectedTile = city.expansion.chooseNewTileToOwn()))

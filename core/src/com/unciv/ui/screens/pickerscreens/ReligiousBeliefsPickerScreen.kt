@@ -7,6 +7,7 @@ import com.badlogic.gdx.utils.Align
 import com.unciv.Constants
 import com.unciv.UncivGame
 import com.unciv.logic.civilization.Civilization
+import com.unciv.logic.multiplayer.GameAction
 import com.unciv.logic.civilization.managers.ReligionState
 import com.unciv.models.Counter
 import com.unciv.models.Religion
@@ -84,12 +85,12 @@ class ReligiousBeliefsPickerScreen (
                 if (broadcastManager != null) {
                     val beliefNames = beliefsToChoose.map { it.belief!!.name }
                     if (civInfo.religionManager.religionState == ReligionState.FoundingReligion) {
-                        broadcastManager.sendCompleteFoundReligionAction(
-                            civInfo.civName, displayName!!, religionName!!, beliefNames
+                        broadcastManager.sendGameAction(
+                            GameAction.CompleteFoundReligionAction(civInfo.civName, displayName!!, religionName!!, beliefNames)
                         )
                     } else {
-                        broadcastManager.sendCompleteEnhanceReligionAction(
-                            civInfo.civName, beliefNames
+                        broadcastManager.sendGameAction(
+                            GameAction.CompleteEnhanceReligionAction(civInfo.civName, beliefNames)
                         )
                     }
                     // Need to dismiss this screen — the validated echo will update state

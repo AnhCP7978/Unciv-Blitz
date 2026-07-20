@@ -5,6 +5,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane
 import com.badlogic.gdx.scenes.scene2d.ui.Table
 import com.unciv.Constants
 import com.unciv.UncivGame
+import com.unciv.logic.multiplayer.GameAction
 import com.unciv.logic.battle.BattleUnitCapture
 import com.unciv.logic.city.City
 import com.unciv.logic.civilization.AlertType
@@ -182,9 +183,9 @@ class AlertPopup(
             addCloseButton("THIS MEANS WAR!", KeyboardBinding.Confirm) {
             player.getDiplomacyManager(bullyOrAttacker)!!.sideWithCityState()
             val warReason = if (popupAlert.type == AlertType.AttackedAllyMinor) WarType.AlliedCityStateWar else WarType.ProtectedCityStateWar
-            if (!SimultaneousModeInterceptor.interceptDeclareWar(worldScreen, player.civName, bullyOrAttacker.civName)) {
+            if (!SimultaneousModeInterceptor.interceptDeclareWar(player.civName, bullyOrAttacker.civName))
                 player.getDiplomacyManager(bullyOrAttacker)!!.declareWar(DeclareWarReason(warReason, cityState))
-            }
+
             cityState.getDiplomacyManager(player)!!.influence += 20f // You went to war for us!!
         }.row()}
 
@@ -209,7 +210,7 @@ class AlertPopup(
         fun broadcastCapture(mode: String) {
             if (gameInfo.gameParameters.isSimultaneousGame)
                 worldScreen.actionBroadcastManager
-                    ?.sendCaptureCityAction(city.id, conqueringCiv.civName, mode)
+                    ?.sendGameAction(GameAction.CaptureCityAction(city.id, conqueringCiv.civName, mode))
         }
 
         if (city.foundingCivObject != null
@@ -302,9 +303,8 @@ class AlertPopup(
         val diplomacy = viewingCiv.getDiplomacyManager(denouncer)!!
         if (diplomacy.canDeclareWar()) {
             addCloseButton("THIS MEANS WAR! (Declare war)") {
-                if (!SimultaneousModeInterceptor.interceptDeclareWar(worldScreen, viewingCiv.civName, denouncer.civName)) {
+                if (!SimultaneousModeInterceptor.interceptDeclareWar(viewingCiv.civName, denouncer.civName))
                     diplomacy.declareWar()
-                }
             }.row()
         }
         addCloseButton("Very well.", KeyboardBinding.Cancel).row()
@@ -332,8 +332,7 @@ class AlertPopup(
         }.row()
         addCloseButton(demand.refuseDemandText, KeyboardBinding.Cancel) {
             playerDiploManager.refuseDemand(demand)
-            if (demand == Demand.DoNotAttackUs
-                && !SimultaneousModeInterceptor.interceptDeclareWar(worldScreen, viewingCiv.civName, otherciv.civName))
+            if (demand == Demand.DoNotAttackUs && !SimultaneousModeInterceptor.interceptDeclareWar(viewingCiv.civName, otherciv.civName))
                 viewingCiv.getDiplomacyManager(otherciv)!!.declareWar()
         }
         return true
@@ -448,7 +447,7 @@ class AlertPopup(
         bottomTable.defaults().pad(0f, 30f) // Small buttons, plenty of pad so we don't fat-finger it
 
         addCloseButton(Constants.yes, KeyboardBinding.Confirm) {
-            if (SimultaneousModeInterceptor.interceptReturnCapturedUnit(worldScreen, capturedUnit.id, true)) return@addCloseButton
+            if (SimultaneousModeInterceptor.interceptReturnCapturedUnit(capturedUnit.id, true)) return@addCloseButton
             // Return it to original owner
             val unitName = capturedUnit.baseUnit.name
             capturedUnit.destroy()
@@ -476,7 +475,7 @@ class AlertPopup(
             originalOwner.addNotification("Your captured [${unitName}] has been returned by [${captor.civName}]", notificationSequence, NotificationCategory.Diplomacy, NotificationIcon.Trade, unitName, captor.civName)
         }
         addCloseButton(Constants.no, KeyboardBinding.Cancel) {
-            if (SimultaneousModeInterceptor.interceptReturnCapturedUnit(worldScreen, capturedUnit.id, false)) return@addCloseButton
+            if (SimultaneousModeInterceptor.interceptReturnCapturedUnit(capturedUnit.id, false)) return@addCloseButton
             // Take it for ourselves
             BattleUnitCapture.captureOrConvertToWorker(capturedUnit, captor)
         }
@@ -634,7 +633,7 @@ class AlertPopup(
             city.liberateCity(conqueringCiv)
             if (gameInfo.gameParameters.isSimultaneousGame)
                 worldScreen.actionBroadcastManager
-                    ?.sendCaptureCityAction(city.id, conqueringCiv.civName, "Liberate")
+                    ?.sendGameAction(GameAction.CaptureCityAction(city.id, conqueringCiv.civName, "Liberate"))
             close()
         }
         button.keyShortcuts.add('l')
@@ -654,7 +653,7 @@ class AlertPopup(
                     city.isBeingRazed = true
                     if (gameInfo.gameParameters.isSimultaneousGame)
                         worldScreen.actionBroadcastManager
-                            ?.sendCaptureCityAction(city.id, conqueringCiv.civName, "Raze")
+                            ?.sendGameAction(GameAction.CaptureCityAction(city.id, conqueringCiv.civName, "Raze"))
                     close()
                 }
                 keyShortcuts.add('r')

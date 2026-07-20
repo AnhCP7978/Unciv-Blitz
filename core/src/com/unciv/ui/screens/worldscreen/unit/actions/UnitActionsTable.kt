@@ -195,21 +195,10 @@ class UnitActionsTable(val worldScreen: WorldScreen) : Table() {
     }
 
     private fun activateAction(unitAction: UnitAction, unit: MapUnit) {
-        // Simultaneous mode: intercept FoundCity and BuildImprovement to route through host
-        val intercepted = SimultaneousModeInterceptor.interceptUnitAction(
-            worldScreen, unit, unitAction,
-            originalAction = unitAction.action!!
-        )
-        if (intercepted != null) {
-            intercepted.invoke()
-            worldScreen.shouldUpdate = true
-            worldScreen.mapHolder.removeUnitActionOverlay()
-            if (unit.isDestroyed) worldScreen.switchToNextUnit()
-            else worldScreen.bottomUnitTable.shouldUpdate = true
-            return
-        }
+        // Simultanous mode: send action to [ActionBroadcastManager] instead of invoke locally
+        if (!SimultaneousModeInterceptor.interceptUnitAction(unit, unitAction))
+            unitAction.action!!.invoke()
 
-        unitAction.action!!.invoke()
         worldScreen.shouldUpdate = true
         // We keep the unit action/selection overlay from the previous unit open even when already selecting another unit
         // so you need less clicks/touches to do things, but once we do an action with the new unit, we want to close this

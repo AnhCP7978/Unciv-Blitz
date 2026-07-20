@@ -9,6 +9,7 @@ import com.unciv.ui.images.ImageGetter
 import com.unciv.ui.components.extensions.isEnabled
 import com.unciv.ui.components.input.onClick
 import com.unciv.ui.components.input.onDoubleClick
+import com.unciv.logic.multiplayer.SimultaneousModeInterceptor
 import com.unciv.ui.screens.worldscreen.WorldScreen
 
 class GreatPersonPickerScreen(val worldScreen: WorldScreen, val civInfo: Civilization) : PickerScreen() {
@@ -46,15 +47,15 @@ class GreatPersonPickerScreen(val worldScreen: WorldScreen, val civInfo: Civiliz
     }
 
     private fun confirmAction(useMayaLongCount: Boolean) {
-        if (civInfo.gameInfo.gameParameters.isSimultaneousGame) {
-            UncivGame.Current.worldScreen?.actionBroadcastManager
-                ?.sendSpawnUnitAction(
-                    theChosenOne!!.name, civInfo.getCapital()?.id, civInfo.civName,
-                    freeGreatPeopleDecrement = 1,
-                    mayaLimitedFreeGPDecrement = if (useMayaLongCount) 1 else 0,
-                    longCountGPPoolRemoval = if (useMayaLongCount) listOf(theChosenOne!!.name) else emptyList(),
-                )
-        } else {
+        if (SimultaneousModeInterceptor.interceptSpawnUnit(
+            theChosenOne!!.name, civInfo.getCapital()?.id, civInfo.civName,
+            freeGreatPeopleDecrement = 1,
+            mayaLimitedFreeGPDecrement = if (useMayaLongCount) 1 else 0,
+            longCountGPPoolRemoval = if (useMayaLongCount) listOf(theChosenOne!!.name) else emptyList(),
+        )) {
+            return
+        }
+        else {
             civInfo.units.addUnit(theChosenOne!!, civInfo.getCapital())
         }
         civInfo.greatPeople.freeGreatPeople--

@@ -255,8 +255,7 @@ class GameInfo : IsPartOfGameInfoSerialization, HasGameInfoSerializationVersion 
     fun getCivilizationOrNull(civID: String) = civMap[civID]
         ?: civilizations.firstOrNull { it.civID == civID }
 
-    /** Resolve a unit by its globally unique id across all civilizations. (Only use for Simultaneous mode for now) */
-    @Readonly
+    @Readonly // Resolve a unit by its globally unique id across all civilizations. (Only for Simultaneous mode)
     fun getUnitById(unitId: Int): MapUnit? = civilizations.asSequence().flatMap { it.units.getCivUnits() }.firstOrNull { it.id == unitId }
 
     fun getCurrentPlayerCivilization() = currentPlayerCiv

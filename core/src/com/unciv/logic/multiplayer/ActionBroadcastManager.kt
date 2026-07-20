@@ -4,11 +4,11 @@ import com.badlogic.gdx.Gdx
 import com.unciv.UncivGame
 import com.unciv.ui.screens.worldscreen.WorldScreen
 import com.unciv.ui.screens.worldscreen.unit.actions.UnitActions
-import com.unciv.ui.screens.worldscreen.unit.actions.UnitActionsPillage
-import com.unciv.ui.screens.worldscreen.unit.actions.UnitActionsReligion
+import com.unciv.ui.screens.worldscreen.unit.actions.UnitActionModifiers
 import com.unciv.ui.screens.worldscreen.bottombar.BattleTableHelpers.battleAnimationDeferred
 import com.unciv.utils.debug
 import com.unciv.utils.Concurrency
+import com.unciv.logic.city.City
 import com.unciv.logic.map.tile.Tile
 import com.unciv.logic.map.mapunit.MapUnit
 import com.unciv.logic.civilization.LocationAction
@@ -37,22 +37,24 @@ import com.unciv.logic.civilization.managers.ReligionState
 import com.unciv.models.stats.Stat
 import com.unciv.models.ruleset.Belief
 import com.unciv.models.ruleset.INonPerpetualConstruction
+import com.unciv.models.ruleset.unique.GameContext
+import com.unciv.models.ruleset.unique.UniqueTriggerActivation
 import com.unciv.models.UnitActionType
 import kotlinx.serialization.json.Json
 import kotlin.math.roundToInt
 
 // ──────────────────────────────────────
-//  Trade data ↔ domain object conversion
+//  Trade data Ã¢â€ â€ domain object conversion
 // ──────────────────────────────────────
 
-private fun TradeOffer.toTradeOfferData() = GameAction.TradeOfferData(name, type.name, amount, duration)
-private fun GameAction.TradeOfferData.toTradeOffer() = TradeOffer(name, TradeOfferType.valueOf(type), amount, duration)
+internal fun TradeOffer.toTradeOfferData() = GameAction.TradeOfferData(name, type.name, amount, duration)
+internal fun GameAction.TradeOfferData.toTradeOffer() = TradeOffer(name, TradeOfferType.valueOf(type), amount, duration)
 
-private fun Trade.toTradeData() = GameAction.TradeData(
+internal fun Trade.toTradeData() = GameAction.TradeData(
     theirOffers.map { it.toTradeOfferData() },
     ourOffers.map { it.toTradeOfferData() }
 )
-private fun GameAction.TradeData.toTrade(): Trade {
+internal fun GameAction.TradeData.toTrade(): Trade {
     val t = Trade()
     t.theirOffers.addAll(theirOffers.map { it.toTradeOffer() })
     t.ourOffers.addAll(ourOffers.map { it.toTradeOffer() })
@@ -62,11 +64,11 @@ private fun GameAction.TradeData.toTrade(): Trade {
 /**
  * Orchestrates the 2-phase broadcast protocol for simultaneous multiplayer:
  *
- * **Non-host** players send actions via WebSocket → server relays to all
- * (including host) → host validates → host broadcasts acceptance/rejection.
+ * **Non-host** players send actions via WebSocket Ã¢â€ â€™ server relays to all
+ * (including host) Ã¢â€ â€™ host validates Ã¢â€ â€™ host broadcasts acceptance/rejection.
  *
- * **Host** listens for all "end turn" signals → runs [SimultaneousTurnProcessor.processAdvance]
- * → uploads game file → broadcasts [Response.TurnAdvanced] so everyone downloads.
+ * **Host** listens for all "end turn" signals Ã¢â€ â€™ runs [SimultaneousTurnProcessor.processAdvance]
+ * Ã¢â€ â€™ uploads game file Ã¢â€ â€™ broadcasts [Response.TurnAdvanced] so everyone downloads.
  */
 class ActionBroadcastManager(private val worldScreen: WorldScreen) {
     private val gameId get() = worldScreen.gameInfo.gameId
@@ -79,27 +81,22 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
     private val pendingChoices = mutableMapOf<String, String>()
 
     /** Look up a unit by globally-unique ID across all civs. */
-    private fun findUnitById(unitId: Int): MapUnit? =
-        worldScreen.gameInfo.getUnitById(unitId)
+    private fun findUnitById(unitId: Int): MapUnit? = worldScreen.gameInfo.getUnitById(unitId)
 
     /** Look up a city by globally-unique UUID across all civs. */
-    private fun findCityById(cityId: String) =
+    private fun findCityById(cityId: String): City? =
         worldScreen.gameInfo.civilizations.asSequence()
             .flatMap { it.cities.asSequence() }
             .firstOrNull { it.id == cityId }
 
     // ──────────────────────────────────────
-    //  Send (called when local player acts)
+    //  Send packet when [SimultaneousModeInterceptor] intercepted an action
     // ──────────────────────────────────────
 
-    /** Construct a [GameActionPacket] and send it.
-     *  Host applies locally first (won't receive an echo in the new routing),
-     *  then sends with validated=true so server broadcasts to all others.
-     *  Non-host sends with validated=false so server routes only to host. */
-    private fun sendGameAction(action: GameAction) {
+    internal fun sendGameAction(action: GameAction) {
         val validated = isHost()
         if (validated) {
-            // Host applies locally before sending — server won't echo back to host
+            // Host applies locally before sending since server won't echo back to host
             applyActionLocally(action)
         }
         val packet = GameActionPacket(gameId, action, validated)
@@ -112,14 +109,17 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
     private fun applyActionLocally(action: GameAction) {
         when (action) {
             is GameAction.MoveAction -> applyRemoteMove(action)
-            is GameAction.AttackAction -> applyRemoteAttack(action)
+            is GameAction.UnitAttackAction -> applyRemoteUnitAttack(action)
+            is GameAction.CityAttackAction -> applyRemoteCityAttack(action)
+
+            is GameAction.InvokeUnitAction -> applyRemoteInvokeUnit(action)
+            is GameAction.UpgradeUnitAction -> applyRemoteUpgradeUnit(action)
+            is GameAction.TriggerUniqueAction -> applyRemoteTriggerUnique(action)
+
             is GameAction.PromoteAction -> applyRemotePromote(action)
-            is GameAction.ConsumeUnitAction -> applyRemoteConsumeUnit(action)
-            is GameAction.UpdateUnitAction -> applyRemoteUpdateUnit(action)
+
             is GameAction.CreateImprovementAction -> applyRemoteCreateImprovement(action)
-            is GameAction.TriggerUnitAction -> applyRemoteTriggerUnit(action)
             is GameAction.BuyTileAction -> applyRemoteBuyTile(action)
-            is GameAction.CityBombardAction -> applyRemoteCityBombard(action)
             is GameAction.PurchaseAction -> applyRemotePurchase(action)
             is GameAction.DeclareWarAction -> applyRemoteDeclareWar(action)
             is GameAction.CaptureCityAction -> applyRemoteCaptureCity(action)
@@ -131,8 +131,7 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
             is GameAction.CompleteEnhanceReligionAction -> applyRemoteCompleteEnhanceReligion(action)
             is GameAction.SendTradeRequestAction -> applyRemoteSendTradeRequest(action)
             is GameAction.AcceptTradeAction -> applyRemoteAcceptTrade(action)
-            is GameAction.TributeGoldAction -> applyRemoteTributeGold(action)
-            is GameAction.TributeWorkerAction -> applyRemoteTributeWorker(action)
+            is GameAction.TakeTributeAction -> applyRemoteTakeTribute(action)
             is GameAction.GoldGiftAction -> applyRemoteGoldGift(action)
             is GameAction.SetProtectionAction -> applyRemoteSetProtection(action)
             is GameAction.GiftImprovementAction -> applyRemoteGiftImprovement(action)
@@ -140,108 +139,6 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
             else -> {}
         }
     }
-
-    // ──────────────────────────────────────
-    //  Send helpers — match new GameAction data classes
-    // ──────────────────────────────────────
-
-    fun sendMoveAction(unitId: Int, toX: Int, toY: Int) =
-        sendGameAction(GameAction.MoveAction(unitId, toX, toY))
-
-    fun sendAttackAction(unitId: Int, targetX: Int, targetY: Int) =
-        sendGameAction(GameAction.AttackAction(unitId, targetX, targetY))
-
-    fun sendConsumeUnitAction(unitId: Int, actionType: String) =
-        sendGameAction(GameAction.ConsumeUnitAction(unitId, actionType))
-
-    fun sendUpdateUnitAction(unitId: Int, actionType: String, param: String? = null) =
-        sendGameAction(GameAction.UpdateUnitAction(unitId, actionType, param))
-
-    fun sendBuyTileAction(cityId: String, tileX: Int, tileY: Int) =
-        sendGameAction(GameAction.BuyTileAction(cityId, tileX, tileY))
-
-    fun sendDeclareWarAction(civName: String, otherCivName: String) =
-        sendGameAction(GameAction.DeclareWarAction(civName, otherCivName))
-
-    fun sendCaptureCityAction(cityId: String, civName: String, mode: String) =
-        sendGameAction(GameAction.CaptureCityAction(cityId, civName, mode))
-
-    fun sendCityBombardAction(cityId: String, targetTileX: Int, targetTileY: Int) =
-        sendGameAction(GameAction.CityBombardAction(cityId, targetTileX, targetTileY))
-
-    fun sendPromoteAction(unitId: Int, promotionName: String) =
-        sendGameAction(GameAction.PromoteAction(unitId, promotionName))
-
-    fun sendReturnCapturedUnitAction(unitId: Int, returnToOwner: Boolean) =
-        sendGameAction(GameAction.ReturnCapturedUnitAction(unitId, returnToOwner))
-
-    fun sendCreateImprovementAction(unitId: Int, improvementName: String) =
-        sendGameAction(GameAction.CreateImprovementAction(unitId, improvementName))
-
-    fun sendTriggerUnitAction(unitId: Int, uniqueText: String) =
-        sendGameAction(GameAction.TriggerUnitAction(unitId, uniqueText))
-
-    fun sendPurchaseAction(constructionName: String, cityId: String, stat: String) =
-        sendGameAction(GameAction.PurchaseAction(constructionName, cityId, stat))
-
-    fun sendAdoptPolicyAction(policyName: String, civName: String) =
-        sendGameAction(GameAction.AdoptPolicyAction(policyName, civName))
-
-    fun sendChooseFreeTechAction(techName: String, civName: String) =
-        sendGameAction(GameAction.ChooseFreeTechAction(techName, civName))
-
-    fun sendFoundPantheonAction(beliefName: String, civName: String) =
-        sendGameAction(GameAction.FoundPantheonAction(beliefName, civName))
-
-    fun sendSpawnUnitAction(
-        unitName: String, cityId: String?, civName: String,
-        freeGreatPeopleDecrement: Int = 0,
-        mayaLimitedFreeGPDecrement: Int = 0,
-        longCountGPPoolRemoval: List<String> = emptyList(),
-    ) = sendGameAction(
-        GameAction.SpawnUnitAction(
-            unitName, cityId, civName,
-            freeGreatPeopleDecrement, mayaLimitedFreeGPDecrement, longCountGPPoolRemoval,
-        )
-    )
-
-    fun sendSendTradeRequestAction(trade: Trade, targetCiv: String, civName: String) =
-        sendGameAction(GameAction.SendTradeRequestAction(civName, targetCiv, trade.toTradeData()))
-
-    fun sendAcceptTradeAction(trade: Trade, requestingCiv: String, civName: String) =
-        sendGameAction(GameAction.AcceptTradeAction(civName, requestingCiv, trade.toTradeData()))
-
-    // ──────────────────────────────────────
-    //  City-State interaction sends
-    // ──────────────────────────────────────
-
-    fun sendTributeGoldAction(cityStateCivName: String, civName: String) =
-        sendGameAction(GameAction.TributeGoldAction(cityStateCivName, civName))
-
-    fun sendTributeWorkerAction(cityStateCivName: String, civName: String) =
-        sendGameAction(GameAction.TributeWorkerAction(cityStateCivName, civName))
-
-    fun sendGoldGiftAction(cityStateCivName: String, giftAmount: Int, civName: String) =
-        sendGameAction(GameAction.GoldGiftAction(cityStateCivName, giftAmount, civName))
-
-    fun sendSetProtectionAction(cityStateCivName: String, protect: Boolean, civName: String) =
-        sendGameAction(GameAction.SetProtectionAction(cityStateCivName, protect, civName))
-
-    fun sendGiftImprovementAction(cityStateCivName: String, tileX: Int, tileY: Int, improvementName: String, civName: String) =
-        sendGameAction(GameAction.GiftImprovementAction(cityStateCivName, tileX, tileY, improvementName, civName))
-
-    fun sendDiplomaticMarriageAction(cityStateCivName: String, civName: String) =
-        sendGameAction(GameAction.DiplomaticMarriageAction(cityStateCivName, civName))
-
-    // ──────────────────────────────────────
-    //  Religion sends
-    // ──────────────────────────────────────
-
-    fun sendCompleteFoundReligionAction(civName: String, displayName: String, religionName: String, beliefNames: List<String>) =
-        sendGameAction(GameAction.CompleteFoundReligionAction(civName, displayName, religionName, beliefNames))
-
-    fun sendCompleteEnhanceReligionAction(civName: String, beliefNames: List<String>) =
-        sendGameAction(GameAction.CompleteEnhanceReligionAction(civName, beliefNames))
 
     init {
         // Register as the action response handler in ChatStore
@@ -281,7 +178,6 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
     // ──────────────────────────────────────
     //  Response dispatch
     // ──────────────────────────────────────
-
     private fun onActionResponse(response: Response) {
         Concurrency.run("HandleActionResponse") {
             when (response) {
@@ -343,284 +239,151 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
     }
 
     // ──────────────────────────────────────
-    //  Apply remote actions (all clients)
+    //  Apply remote actions (all clients) - Run when received a validated packet. Since all moves technically have to be validated by host, I remove all safe-check on applyRemote...
     // ──────────────────────────────────────
+
+    // Optimized with inline because it takes lambdas! 🚀
+    private inline fun applyRemoteActionHelper(
+        packet: GameActionPacket,
+        hostValidateFunc: (GameActionPacket) -> Unit, 
+        applyRemoteFunc: (GameAction) -> Unit,
+        debugStr: String? = null
+    ) {
+        if (!packet.validated)
+            hostValidateFunc(packet) // IF design work as intented, ONLY host would receive unvalidated packet, hence no check "if (isHost())" here
+        else {
+            if (debugStr != null) debug(debugStr)
+            applyRemoteFunc(packet.action)
+        }
+    }
 
     private fun applyRemoteAction(packet: GameActionPacket) {
         when (val action = packet.action) {
-            is GameAction.MoveAction -> {
-                if (!packet.validated) {
-                    if (isHost()) hostValidateMove(packet)
-                    return
-                }
-                debug("Applying remote move: unit %s -> (%s, %s)",
-                    action.unitId, action.toX, action.toY)
-                applyRemoteMove(action)
-            }
-            is GameAction.BuyTileAction -> {
-                if (!packet.validated) {
-                    if (isHost()) hostValidateBuyTile(packet)
-                    return
-                }
-                debug("Applying remote buy tile: tile (%s,%s)", action.tileX, action.tileY)
-                applyRemoteBuyTile(action)
-            }
-            is GameAction.DeclareWarAction -> {
-                if (!packet.validated) {
-                    if (isHost()) hostValidateDeclareWar(packet)
-                    return
-                }
-                debug("Applying remote declare war: %s vs %s",
-                    action.civName, action.otherCivName)
-                applyRemoteDeclareWar(action)
-            }
-            is GameAction.AttackAction -> {
-                if (!packet.validated) {
-                    if (isHost()) hostValidateAttack(packet)
-                    return
-                }
-                debug("Applying remote attack: unit %s -> (%s, %s)",
-                    action.unitId, action.targetX, action.targetY)
-                applyRemoteAttack(action)
-            }
-            is GameAction.CityBombardAction -> {
-                if (!packet.validated) {
-                    if (isHost()) hostValidateCityBombard(packet)
-                    return
-                }
-                debug("Applying remote city bombard: city %s -> (%s, %s)",
-                    action.cityId, action.targetTileX, action.targetTileY)
-                applyRemoteCityBombard(action)
-            }
-            is GameAction.PromoteAction -> {
-                if (!packet.validated) {
-                    if (isHost()) hostValidatePromote(packet)
-                    return
-                }
-                debug("Applying remote promote: unit %s <- %s",
-                    action.unitId, action.promotionName)
-                applyRemotePromote(action)
-            }
-            is GameAction.PurchaseAction -> {
-                if (!packet.validated) {
-                    if (isHost()) hostValidatePurchase(packet)
-                    return
-                }
-                debug("Applying remote purchase: %s in %s",
-                    action.constructionName, action.cityId)
-                applyRemotePurchase(action)
-            }
-            is GameAction.AdoptPolicyAction -> {
-                if (!packet.validated) {
-                    if (isHost()) hostValidateAdoptPolicy(packet)
-                    return
-                }
-                debug("Applying remote adopt policy: %s for %s",
-                    action.policyName, action.civName)
-                applyRemoteAdoptPolicy(action)
-            }
-            is GameAction.FoundPantheonAction -> {
-                if (!packet.validated) {
-                    if (isHost()) hostValidateFoundPantheon(packet)
-                    return
-                }
-                debug("Applying remote found pantheon: %s for %s",
-                    action.beliefName, action.civName)
-                applyRemoteFoundPantheon(action)
-            }
-            is GameAction.ChooseFreeTechAction -> {
-                if (!packet.validated) {
-                    if (isHost()) hostValidateChooseFreeTech(packet)
-                    return
-                }
-                debug("Applying remote choose free tech: %s for %s",
-                    action.techName, action.civName)
-                applyRemoteChooseFreeTech(action)
-            }
-            is GameAction.CreateImprovementAction -> {
-                if (!packet.validated) {
-                    if (isHost()) hostValidateCreateImprovement(packet)
-                    return
-                }
-                debug("Applying remote create improvement: %s", action.improvementName)
-                applyRemoteCreateImprovement(action)
-            }
-            is GameAction.TriggerUnitAction -> {
-                if (!packet.validated) {
-                    if (isHost()) hostValidateTriggerUnit(packet)
-                    return
-                }
-                debug("Applying remote trigger unit: unit %s unique %s",
-                    action.unitId, action.uniqueText)
-                applyRemoteTriggerUnit(action)
-            }
-            is GameAction.SpawnUnitAction -> {
-                if (!packet.validated) {
-                    if (isHost()) hostValidateSpawnUnit(packet)
-                    return
-                }
-                debug("Applying remote spawn unit: %s for %s",
-                    action.unitName, action.civName)
-                applyRemoteSpawnUnit(action)
-            }
-            is GameAction.SendTradeRequestAction -> {
-                if (!packet.validated) {
-                    if (isHost()) hostValidateSendTradeRequest(packet)
-                    return
-                }
-                debug("Applying remote send trade request: %s -> %s",
-                    action.requestingCiv, action.targetCiv)
-                applyRemoteSendTradeRequest(action)
-            }
-            is GameAction.AcceptTradeAction -> {
-                if (!packet.validated) {
-                    if (isHost()) hostValidateAcceptTrade(packet)
-                    return
-                }
-                debug("Applying remote accept trade: %s accepts from %s",
-                    action.acceptingCiv, action.requestingCiv)
-                applyRemoteAcceptTrade(action)
-            }
-            is GameAction.TributeGoldAction -> {
-                if (!packet.validated) {
-                    if (isHost()) hostValidateTributeGold(packet)
-                    return
-                }
-                debug("Applying remote tribute gold: %s -> %s",
-                    action.civName, action.cityStateCivName)
-                applyRemoteTributeGold(action)
-            }
-            is GameAction.TributeWorkerAction -> {
-                if (!packet.validated) {
-                    if (isHost()) hostValidateTributeWorker(packet)
-                    return
-                }
-                debug("Applying remote tribute worker: %s -> %s",
-                    action.civName, action.cityStateCivName)
-                applyRemoteTributeWorker(action)
-            }
-            is GameAction.GoldGiftAction -> {
-                if (!packet.validated) {
-                    if (isHost()) hostValidateGoldGift(packet)
-                    return
-                }
-                debug("Applying remote gold gift: %s -> %s (%s gold)",
-                    action.civName, action.cityStateCivName, action.giftAmount)
-                applyRemoteGoldGift(action)
-            }
-            is GameAction.SetProtectionAction -> {
-                if (!packet.validated) {
-                    if (isHost()) hostValidateSetProtection(packet)
-                    return
-                }
-                debug("Applying remote set protection: %s %s %s",
-                    action.civName, if (action.protect) "pledges" else "revokes", action.cityStateCivName)
-                applyRemoteSetProtection(action)
-            }
-            is GameAction.GiftImprovementAction -> {
-                if (!packet.validated) {
-                    if (isHost()) hostValidateGiftImprovement(packet)
-                    return
-                }
-                debug("Applying remote gift improvement: %s -> %s (%s)",
-                    action.civName, action.cityStateCivName, action.improvementName)
-                applyRemoteGiftImprovement(action)
-            }
-            is GameAction.DiplomaticMarriageAction -> {
-                if (!packet.validated) {
-                    if (isHost()) hostValidateDiplomaticMarriage(packet)
-                    return
-                }
-                debug("Applying remote diplomatic marriage: %s <- %s",
-                    action.civName, action.cityStateCivName)
-                applyRemoteDiplomaticMarriage(action)
-            }
-            is GameAction.CompleteFoundReligionAction -> {
-                if (!packet.validated) {
-                    if (isHost()) hostValidateCompleteFoundReligion(packet)
-                    return
-                }
-                debug("Applying remote complete found religion: %s -> %s",
-                    action.civName, action.religionName)
-                applyRemoteCompleteFoundReligion(action)
-            }
-            is GameAction.CompleteEnhanceReligionAction -> {
-                if (!packet.validated) {
-                    if (isHost()) hostValidateCompleteEnhanceReligion(packet)
-                    return
-                }
-                debug("Applying remote complete enhance religion: %s",
-                    action.civName)
-                applyRemoteCompleteEnhanceReligion(action)
-            }
-            is GameAction.ConsumeUnitAction -> {
-                if (!packet.validated) {
-                    if (isHost()) hostValidateConsumeUnit(packet)
-                    return
-                }
-                debug("Applying remote consume unit: %s type %s",
-                    action.unitId, action.actionType)
-                applyRemoteConsumeUnit(action)
-            }
-            is GameAction.UpdateUnitAction -> {
-                if (!packet.validated) {
-                    if (isHost()) hostValidateUpdateUnit(packet)
-                    return
-                }
-                debug("Applying remote update unit: %s type %s",
-                    action.unitId, action.actionType)
-                applyRemoteUpdateUnit(action)
-            }
-            is GameAction.CaptureCityAction -> {
-                if (!packet.validated) {
-                    if (isHost()) hostValidateCaptureCity(packet)
-                    return
-                }
-                debug("Applying remote capture city: city %s by %s",
-                    action.cityId, action.civName)
-                applyRemoteCaptureCity(action)
-            }
-            is GameAction.ReturnCapturedUnitAction -> {
-                if (!packet.validated) {
-                    if (isHost()) hostValidateReturnCapturedUnit(packet)
-                    return
-                }
-                debug("Applying remote return captured unit: unit %s returnToOwner=%s",
-                    action.unitId, action.returnToOwner)
-                applyRemoteReturnCapturedUnit(action)
-            }
+            is GameAction.MoveAction -> applyRemoteActionHelper(
+                packet, ::hostValidateMove, { applyRemoteMove(it as GameAction.MoveAction) },
+                "Applying remote move: unit ${action.unitId} -> (${action.toX}, ${action.toY})"
+            )
+            is GameAction.UnitAttackAction -> applyRemoteActionHelper(
+                packet, ::hostValidateUnitAttack, { applyRemoteUnitAttack(it as GameAction.UnitAttackAction) },
+                "Applying remote attack: unit ${action.unitId} -> (${action.targetX}, ${action.targetY})"
+            )
+            is GameAction.CityAttackAction -> applyRemoteActionHelper(
+                packet, ::hostValidateCityAttack, { applyRemoteCityAttack(it as GameAction.CityAttackAction) },
+                "Applying remote attack: city ${action.cityId} -> (${action.targetX}, ${action.targetY})"
+            )
+
+            is GameAction.InvokeUnitAction -> applyRemoteActionHelper(
+                packet, ::hostValidateInvokeUnit, { applyRemoteInvokeUnit(it as GameAction.InvokeUnitAction) },
+                "Applying remote action: unit ${action.unitId} do ${action.actionType.value}"
+            )
+            is GameAction.UpgradeUnitAction -> applyRemoteActionHelper(
+                packet, ::hostValidateUpgradeUnit, { applyRemoteUpgradeUnit(it as GameAction.UpgradeUnitAction) },
+                "Applying upgrade: upgrade unit ${action.unitId} to ${action.unitToUpgradeTo}"
+            )
+            is GameAction.TriggerUniqueAction -> applyRemoteActionHelper(
+                packet, ::hostValidateTriggerUnique, { applyRemoteTriggerUnique(it as GameAction.TriggerUniqueAction) },
+                "Applying unique action: unit ${action.unitId} do ${action.uniqueText}"
+            )
+
+            is GameAction.PromoteAction -> applyRemoteActionHelper(
+                packet, ::hostValidatePromote, { applyRemotePromote(it as GameAction.PromoteAction) },
+                "Applying remote promote: unit ${action.unitId} <- ${action.promotionName}"
+            )
+
+            is GameAction.BuyTileAction -> applyRemoteActionHelper(
+                packet, ::hostValidateBuyTile, { applyRemoteBuyTile(it as GameAction.BuyTileAction) },
+                "Applying remote buy tile: tile (${action.tileX}, ${action.tileY})"
+            )
+            is GameAction.DeclareWarAction -> applyRemoteActionHelper(
+                packet, ::hostValidateDeclareWar, { applyRemoteDeclareWar(it as GameAction.DeclareWarAction) },
+                "Applying remote declare war: ${action.civName} vs ${action.otherCivName}"
+            )
+            is GameAction.PurchaseAction -> applyRemoteActionHelper(
+                packet, ::hostValidatePurchase, { applyRemotePurchase(it as GameAction.PurchaseAction) },
+                "Applying remote purchase: ${action.constructionName} in ${action.cityId}"
+            )
+            is GameAction.AdoptPolicyAction -> applyRemoteActionHelper(
+                packet, ::hostValidateAdoptPolicy, { applyRemoteAdoptPolicy(it as GameAction.AdoptPolicyAction) },
+                "Applying remote adopt policy: ${action.policyName} for ${action.civName}"
+            )
+            is GameAction.FoundPantheonAction -> applyRemoteActionHelper(
+                packet, ::hostValidateFoundPantheon, { applyRemoteFoundPantheon(it as GameAction.FoundPantheonAction) },
+                "Applying remote found pantheon: ${action.beliefName} for ${action.civName}"
+            )
+            is GameAction.ChooseFreeTechAction -> applyRemoteActionHelper(
+                packet, ::hostValidateChooseFreeTech, { applyRemoteChooseFreeTech(it as GameAction.ChooseFreeTechAction) },
+                "Applying remote choose free tech: ${action.techName} for ${action.civName}"
+            )
+            is GameAction.CreateImprovementAction -> applyRemoteActionHelper(
+                packet, ::hostValidateCreateImprovement, { applyRemoteCreateImprovement(it as GameAction.CreateImprovementAction) },
+                "Applying remote create improvement: ${action.improvementName}"
+            )
+            is GameAction.SpawnUnitAction -> applyRemoteActionHelper(
+                packet, ::hostValidateSpawnUnit, { applyRemoteSpawnUnit(it as GameAction.SpawnUnitAction) },
+                "Applying remote spawn unit: ${action.unitName} for ${action.civName}"
+            )
+            is GameAction.SendTradeRequestAction -> applyRemoteActionHelper(
+                packet, ::hostValidateSendTradeRequest, { applyRemoteSendTradeRequest(it as GameAction.SendTradeRequestAction) },
+                "Applying remote send trade request: ${action.requestingCiv} -> ${action.targetCiv}"
+            )
+            is GameAction.AcceptTradeAction -> applyRemoteActionHelper(
+                packet, ::hostValidateAcceptTrade, { applyRemoteAcceptTrade(it as GameAction.AcceptTradeAction) },
+                "Applying remote accept trade: ${action.acceptingCiv} accepts from ${action.requestingCiv}"
+            )
+            is GameAction.TakeTributeAction -> applyRemoteActionHelper(
+                packet, ::hostValidateTakeTribute, { applyRemoteTakeTribute(it as GameAction.TakeTributeAction) },
+                "Applying remote take tribute: ${action.civName} -> ${action.cityStateName} (${action.tributeType})"
+            )
+            is GameAction.GoldGiftAction -> applyRemoteActionHelper(
+                packet, ::hostValidateGoldGift, { applyRemoteGoldGift(it as GameAction.GoldGiftAction) },
+                "Applying remote gold gift: ${action.civName} -> ${action.cityStateName} (${action.giftAmount} gold)"
+            )
+            is GameAction.SetProtectionAction -> applyRemoteActionHelper(
+                packet, ::hostValidateSetProtection, { applyRemoteSetProtection(it as GameAction.SetProtectionAction) },
+                "Applying remote set protection: ${action.civName} ${if (action.protect) "pledges" else "revokes"} ${action.cityStateName}"
+            )
+            is GameAction.GiftImprovementAction -> applyRemoteActionHelper(
+                packet, ::hostValidateGiftImprovement, { applyRemoteGiftImprovement(it as GameAction.GiftImprovementAction) },
+                "Applying remote gift improvement: ${action.civName} -> ${action.cityStateName} (${action.improvementName})"
+            )
+            is GameAction.DiplomaticMarriageAction -> applyRemoteActionHelper(
+                packet, ::hostValidateDiplomaticMarriage, { applyRemoteDiplomaticMarriage(it as GameAction.DiplomaticMarriageAction) },
+                "Applying remote diplomatic marriage: ${action.civName} <- ${action.cityStateName}"
+            )
+            is GameAction.CompleteFoundReligionAction -> applyRemoteActionHelper(
+                packet, ::hostValidateCompleteFoundReligion, { applyRemoteCompleteFoundReligion(it as GameAction.CompleteFoundReligionAction) },
+                "Applying remote complete found religion: ${action.civName} -> ${action.religionName}"
+            )
+            is GameAction.CompleteEnhanceReligionAction -> applyRemoteActionHelper(
+                packet, ::hostValidateCompleteEnhanceReligion, { applyRemoteCompleteEnhanceReligion(it as GameAction.CompleteEnhanceReligionAction) },
+                "Applying remote complete enhance religion: ${action.civName}"
+            )
+            is GameAction.CaptureCityAction -> applyRemoteActionHelper(
+                packet, ::hostValidateCaptureCity, { applyRemoteCaptureCity(it as GameAction.CaptureCityAction) },
+                "Applying remote capture city: city ${action.cityId} by ${action.civName}"
+            )
+            is GameAction.ReturnCapturedUnitAction -> applyRemoteActionHelper(
+                packet, ::hostValidateReturnCapturedUnit, { applyRemoteReturnCapturedUnit(it as GameAction.ReturnCapturedUnitAction) },
+                "Applying remote return captured unit: unit ${action.unitId} returnToOwner=${action.returnToOwner}"
+            )
             else -> {}
         }
+        Gdx.app.postRunnable { worldScreen.shouldUpdate = true } // Shared update-screen-after-apply line so I don't have to paste it dozens times...
     }
 
-    // ════════════════════════════════════════
-    //  Move
-    // ════════════════════════════════════════
-
-    private fun applyRemoteMove(action: GameAction.MoveAction) {
-        val unit = findUnitById(action.unitId) ?: run {
-            debug("applyRemoteMove: unit %s not found", action.unitId)
-            return
-        }
-        try {
-            unit.movement.moveToTile(worldScreen.gameInfo.tileMap[action.toX, action.toY])
-        } catch (_: Exception) {
-            debug("applyRemoteMove: could not move unit %s to (%s,%s)",
-                action.unitId, action.toX, action.toY)
-        }
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
-    }
-
+    // ──────────────────────────────────────
+    //  Move ─ Intercept in [WorldMapHolder]
+    // ──────────────────────────────────────
     private fun hostValidateMove(envelope: GameActionPacket) {
         val action = envelope.action as? GameAction.MoveAction ?: return
         val unit = findUnitById(action.unitId)
         if (unit == null || unit.currentMovement <= 0f) {
-            debug("Host rejected move: unit %s is invalid or has no movement point left", action.unitId)
+            debug("Host rejected move: unit ${action.unitId} is invalid or has no movement point left")
             return
         }
         val targetTile = worldScreen.gameInfo.tileMap[action.toX, action.toY]
         if (!unit.movement.canMoveTo(targetTile)) {
-            debug("Host rejected move: cannot move to (${action.toX}, ${action.toY})")
+            debug("Host rejected move: unit ${action.unitId} cannot move to (${action.toX}, ${action.toY})")
             return
         }
         unit.movement.moveToTile(targetTile)
@@ -628,50 +391,176 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
         ChatWebSocket.requestMessageSend(
             com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
         )
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
+    }
+    private fun applyRemoteMove(action: GameAction.MoveAction) {
+        val unit = findUnitById(action.unitId)!!
+        unit.movement.moveToTile(worldScreen.gameInfo.tileMap[action.toX, action.toY])
     }
 
-    // ════════════════════════════════════════
-    //  Buy Tile
-    // ════════════════════════════════════════
+    // ──────────────────────────────────────
+    //  Attack (Unit & City) ─ Intercept in [WorldMapHolder] & [BattleTable]
+    // ──────────────────────────────────────
 
-    private fun hostValidateBuyTile(envelope: GameActionPacket) {
-        val action = envelope.action as? GameAction.BuyTileAction ?: return
+    /* Shared validate function ─ host decides whether to accept & relay the attack */
+    private fun validateAttack(attacker: ICombatant, targetX: Int, targetY: Int, envelope: GameActionPacket) {
+        if (!attacker.canAttack()) return
+
+        val tileToAttack = worldScreen.gameInfo.tileMap[targetX, targetY]
+        // have to check for 2 cases since movePreparingAttack() auto set to true if attacker is city
+        val isValidAttack = if (attacker.isCity()) {
+            val city = (attacker as CityCombatant).city
+            tileToAttack.isVisible(city.civ) // Can see the tile
+                && attacker.getTile().aerialDistanceTo(tileToAttack) <= city.getBombardRange() // target tile is within the range
+                && TargetHelper.containsAttackableEnemy(tileToAttack, attacker) // and there is enemy on it
+        } else {
+            val attackableTile = AttackableTile(
+                attacker.getTile(),
+                tileToAttack,
+                0f, // Unused by movePreparingAttack/attackOrNuke for validation
+                Battle.getMapCombatantOfTile(tileToAttack)
+            )
+            Battle.movePreparingAttack(attacker, attackableTile)
+        }
+
+        if (isValidAttack) {
+            applyAttack(attacker, targetX, targetY)
+            val validatedEnvelope = envelope.copy(validated = true)
+            ChatWebSocket.requestMessageSend(
+                com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
+            )
+        }
+    }
+    private fun applyAttack(attacker: ICombatant, targetX: Int, targetY: Int) {
+        val tileToAttack = worldScreen.gameInfo.tileMap[targetX, targetY]
+        val attackableTile = AttackableTile(
+            attacker.getTile(),
+            tileToAttack,
+            0f, // May wrong, but this is not used in attackOrNuke(), so okay I guess...
+            Battle.getMapCombatantOfTile(tileToAttack)
+        )
+
+        val (damageToDefender, damageToAttacker) = Battle.attackOrNuke(attacker, attackableTile)
+        // Show animation if attacker or defender belong to current player
+        val defender = attackableTile.combatant!!
+        if (attacker.getCivInfo() == worldScreen.viewingCiv || defender.getCivInfo() == worldScreen.viewingCiv)
+            worldScreen.battleAnimationDeferred(attacker, damageToAttacker, defender, damageToDefender)
+    }
+
+    private fun hostValidateUnitAttack(envelope: GameActionPacket) {
+        val action = envelope.action as? GameAction.UnitAttackAction ?: return
+        val unit = findUnitById(action.unitId) ?: return
+        validateAttack(MapUnitCombatant(unit), action.targetX, action.targetY, envelope)
+    }
+    private fun hostValidateCityAttack(envelope: GameActionPacket) {
+        val action = envelope.action as? GameAction.CityAttackAction ?: return
         val city = findCityById(action.cityId) ?: return
-        val tile = worldScreen.gameInfo.tileMap[action.tileX, action.tileY] ?: return
-        if (!city.expansion.canBuyTile(tile)) {
-            debug("Host rejected buy tile: tile (%s,%s) for city %s", action.tileX, action.tileY, action.cityId)
+        validateAttack(CityCombatant(city), action.targetX, action.targetY, envelope)
+    }
+
+    private fun applyRemoteUnitAttack(action: GameAction.UnitAttackAction) {
+        val unit = findUnitById(action.unitId)!!
+        applyAttack(MapUnitCombatant(unit), action.targetX, action.targetY)
+    }
+    private fun applyRemoteCityAttack(action: GameAction.CityAttackAction) {
+        val city = findCityById(action.cityId)!!
+        applyAttack(CityCombatant(city), action.targetX, action.targetY)
+    }
+
+    // ──────────────────────────────────────
+    //  UnitAction ─ Intercept in [UnitActionsTable]
+    // ──────────────────────────────────────
+    private fun hostValidateInvokeUnit(envelope: GameActionPacket) {
+        val action = envelope.action as? GameAction.InvokeUnitAction ?: return
+        val unit = findUnitById(action.unitId) ?: return
+        if (!UnitActions.invokeUnitAction(unit, action.actionType)) {
+            debug("Host rejected action: unit ${action.unitId} cannot do ${action.actionType.value}")
             return
         }
-        applyRemoteBuyTile(action)
         val validatedEnvelope = envelope.copy(validated = true)
         ChatWebSocket.requestMessageSend(
             com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
         )
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
+    }
+    private fun applyRemoteInvokeUnit(action: GameAction.InvokeUnitAction) {
+        val unit = findUnitById(action.unitId)!!
+        UnitActions.invokeUnitAction(unit, action.actionType)
     }
 
-    private fun applyRemoteBuyTile(action: GameAction.BuyTileAction) {
-        val city = findCityById(action.cityId) ?: return
-        val tile = worldScreen.gameInfo.tileMap[action.tileX, action.tileY] ?: return
-        city.expansion.buyTile(tile)
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
+    private fun hostValidateUpgradeUnit(envelope: GameActionPacket) {
+        try {
+            val action = envelope.action as? GameAction.UpgradeUnitAction ?: return
+            val unit = findUnitById(action.unitId) ?: return
+            val upgradedUnit = unit.civ.getEquivalentUnit(action.unitToUpgradeTo)
+
+            val isValidUpgrade = !( // Unit is alive, can act/upgrade and we have enough gold to upgrade
+                unit.isDestroyed || !unit.hasMovement() || !unit.upgrade.canUpgrade(unitToUpgradeTo = upgradedUnit) ||
+                unit.civ.gold < unit.upgrade.getCostOfUpgrade(upgradedUnit)
+            )
+            if (isValidUpgrade) {
+                unit.upgrade.performUpgrade(upgradedUnit, isFree = false)
+                val validatedEnvelope = envelope.copy(validated = true)
+                ChatWebSocket.requestMessageSend(
+                    com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
+                )
+            }
+        } catch (_: Exception) { return }
+    }
+    private fun applyRemoteUpgradeUnit(action: GameAction.UpgradeUnitAction) {
+        val unit = findUnitById(action.unitId)!!
+        val upgradedUnit = unit.civ.getEquivalentUnit(action.unitToUpgradeTo)
+        unit.upgrade.performUpgrade(upgradedUnit, isFree = false)
     }
 
-    // ════════════════════════════════════════
+    private fun hostValidateTriggerUnique(envelope: GameActionPacket) {
+        val action = envelope.action as? GameAction.TriggerUniqueAction ?: return
+        val unit = findUnitById(action.unitId) ?: return
+        if (unit.isDestroyed) return
+
+        // Find the unique by matching its text against all unit uniques
+        val unique = unit.getUniques().firstOrNull { it.text == action.uniqueText } ?: return
+        val triggerFunction = UniqueTriggerActivation.getTriggerFunction(unique, unit.civ, unit = unit, tile = unit.currentTile) ?: return
+        val gameContext = GameContext(unit.civ, null, unit, unit.currentTile)
+
+        repeat(unique.getUniqueMultiplier(gameContext)) { triggerFunction.invoke() }
+        UnitActionModifiers.activateSideEffects(unit, unique)
+        val validatedEnvelope = envelope.copy(validated = true)
+        ChatWebSocket.requestMessageSend(
+            com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
+        )
+    }
+    private fun applyRemoteTriggerUnique(action: GameAction.TriggerUniqueAction) {
+        val unit = findUnitById(action.unitId)!!
+
+        val unique = unit.getUniques().firstOrNull { it.text == action.uniqueText }!!
+        val gameContext = GameContext(unit.civ, null, unit, unit.currentTile)
+        val triggerFunction = UniqueTriggerActivation.getTriggerFunction(unique, unit.civ, unit = unit, tile = unit.currentTile)!!
+
+        repeat(unique.getUniqueMultiplier(gameContext)) { triggerFunction.invoke() }
+        UnitActionModifiers.activateSideEffects(unit, unique)
+    }
+
+    // ──────────────────────────────────────
+    //  Promote
+    // ──────────────────────────────────────
+    private fun hostValidatePromote(envelope: GameActionPacket) {
+        val action = envelope.action as? GameAction.PromoteAction ?: return
+        val unit = findUnitById(action.unitId)
+        if (unit == null || unit.isDestroyed || unit.promotions.getAvailablePromotions().none { it.name == action.promotionName }) return
+
+        unit.promotions.addPromotion(action.promotionName)
+        val validatedEnvelope = envelope.copy(validated = true)
+        ChatWebSocket.requestMessageSend(
+            com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
+        )
+    }
+    private fun applyRemotePromote(action: GameAction.PromoteAction) {
+        val unit = findUnitById(action.unitId)!!
+        unit.promotions.addPromotion(action.promotionName)
+    }
+
+    // ──────────────────────────────────────
     //  Declare War
-    // ════════════════════════════════════════
-
-    private fun applyRemoteDeclareWar(action: GameAction.DeclareWarAction) {
-        val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
-        val otherCiv = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.otherCivName } ?: return
-        val diplomacyManager = civ.getDiplomacyManager(otherCiv) ?: return
-        if (diplomacyManager.canDeclareWar()) {
-            diplomacyManager.declareWar()
-        }
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
-    }
-
+    // ──────────────────────────────────────
     private fun hostValidateDeclareWar(envelope: GameActionPacket) {
         val action = envelope.action as? GameAction.DeclareWarAction ?: return
         val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
@@ -686,255 +575,69 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
         ChatWebSocket.requestMessageSend(
             com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
         )
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
+    }
+    private fun applyRemoteDeclareWar(action: GameAction.DeclareWarAction) {
+        val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName }!!
+        val otherCiv = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.otherCivName }!!
+        val diplomacyManager = civ.getDiplomacyManager(otherCiv)!!
+        diplomacyManager.declareWar()
     }
 
-    // ════════════════════════════════════════
-    //  Attack
-    // ════════════════════════════════════════
-
-    private fun applyRemoteAttack(action: GameAction.AttackAction) {
-        val tileMap = worldScreen.gameInfo.tileMap
-        val unit = findUnitById(action.unitId) ?: return
-        if (!unit.canAttack()) return
-        val attackableTile = TargetHelper
-            .getAttackableEnemies(unit, unit.movement.getDistanceToTiles())
-            .firstOrNull { it.tileToAttack == tileMap[action.targetX, action.targetY] } ?: return
-        val attacker = MapUnitCombatant(unit)
-        if (!Battle.movePreparingAttack(attacker, attackableTile)) return
-        val (damageToDefender, damageToAttacker) = Battle.attackOrNuke(attacker, attackableTile)
-        val defender = attackableTile.combatant
-        if (defender != null) worldScreen.battleAnimationDeferred(attacker, damageToAttacker, defender, damageToDefender)
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
-    }
-
-    private fun hostValidateAttack(envelope: GameActionPacket) {
-        val action = envelope.action as? GameAction.AttackAction ?: return
-        val tileMap = worldScreen.gameInfo.tileMap
-        val unit = findUnitById(action.unitId)
-        if (unit == null || !unit.canAttack()) {
-            debug("Host rejected attack: unit %s is invalid or cannot attack", action.unitId)
+    // ──────────────────────────────────────
+    //  Purchase
+    // ──────────────────────────────────────
+    private fun hostValidatePurchase(envelope: GameActionPacket) {
+        val action = envelope.action as? GameAction.PurchaseAction ?: return
+        val city = findCityById(action.cityId) ?: return
+        val civ = city.civ
+        val stat = try { Stat.valueOf(action.stat) } catch (_: Exception) { return }
+        val construction = city.cityConstructions
+            .getConstruction(action.constructionName) as? INonPerpetualConstruction ?: return
+        val constructionBuyCost = construction.getStatBuyCost(city, stat) ?: return
+        if (!city.cityConstructions.isConstructionPurchaseAllowed(construction, stat, constructionBuyCost)) {
+            debug("Host rejected purchase: %s in %s", action.constructionName, action.cityId)
             return
         }
-        val attackableTile = TargetHelper.getAttackableEnemies(unit, unit.movement.getDistanceToTiles())
-            .firstOrNull { it.tileToAttack == tileMap[action.targetX, action.targetY] }
-        if (attackableTile == null) {
-            debug("Host rejected attack: no valid target at (%s, %s)", action.targetX, action.targetY)
+        applyRemotePurchase(action)
+        val validatedEnvelope = envelope.copy(validated = true)
+        ChatWebSocket.requestMessageSend(
+            com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
+        )
+    }
+    private fun applyRemotePurchase(action: GameAction.PurchaseAction) {
+        val city = findCityById(action.cityId) ?: return
+        val civ = city.civ
+        val stat = try { Stat.valueOf(action.stat) } catch (_: Exception) { return }
+        // queuePosition removed (was only for queue ordering, not essential for broadcast)
+        // tileX/tileY removed (BuyTileAction covers tile purchases)
+        city.cityConstructions.purchaseConstruction(action.constructionName, -1, false, stat, null)
+    }
+
+    // ──────────────────────────────────────
+    //  Buy Tile
+    // ──────────────────────────────────────
+    private fun hostValidateBuyTile(envelope: GameActionPacket) {
+        val action = envelope.action as? GameAction.BuyTileAction ?: return
+        val city = findCityById(action.cityId) ?: return
+        val tile = worldScreen.gameInfo.tileMap[action.tileX, action.tileY]
+        if (!city.expansion.canBuyTile(tile)) {
+            debug("Host rejected purchase: city %s can't buy tile (%s, %s)", action.cityId, action.tileX, action.tileY)
             return
         }
-        val attacker = MapUnitCombatant(unit)
-        if (!Battle.movePreparingAttack(attacker, attackableTile)) return
-        Battle.attackOrNuke(attacker, attackableTile)
+        city.expansion.buyTile(tile)
         val validatedEnvelope = envelope.copy(validated = true)
         ChatWebSocket.requestMessageSend(
             com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
         )
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
+    }
+    private fun applyRemoteBuyTile(action: GameAction.BuyTileAction) {
+        val city = findCityById(action.cityId)!!
+        city.expansion.buyTile(worldScreen.gameInfo.tileMap[action.tileX, action.tileY])
     }
 
-    // ════════════════════════════════════════
-    //  City Bombard
-    // ════════════════════════════════════════
-
-    private fun applyRemoteCityBombard(action: GameAction.CityBombardAction) {
-        val tileMap = worldScreen.gameInfo.tileMap
-        val targetTile = tileMap[action.targetTileX, action.targetTileY]
-        val city = findCityById(action.cityId) ?: return
-        if (!city.canBombard()) return
-        val attacker = CityCombatant(city)
-        val attackableTile = AttackableTile(attacker.getTile(), targetTile, 0f,
-            getMapCombatantOfTile(targetTile))
-        if (!Battle.movePreparingAttack(attacker, attackableTile)) return
-        val defender = attackableTile.combatant
-        val (damageToDefender, damageToAttacker) = Battle.attackOrNuke(attacker, attackableTile)
-        if (defender != null) {
-            worldScreen.battleAnimationDeferred(attacker, damageToAttacker, defender, damageToDefender)
-        }
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
-    }
-
-    private fun hostValidateCityBombard(envelope: GameActionPacket) {
-        val action = envelope.action as? GameAction.CityBombardAction ?: return
-        val tileMap = worldScreen.gameInfo.tileMap
-        val targetTile = tileMap[action.targetTileX, action.targetTileY]
-        val city = findCityById(action.cityId) ?: return
-        if (!city.canBombard()) return
-        val attacker = CityCombatant(city)
-        val attackableTile = AttackableTile(attacker.getTile(), targetTile, 0f,
-            getMapCombatantOfTile(targetTile))
-        if (!Battle.movePreparingAttack(attacker, attackableTile)) return
-        Battle.attackOrNuke(attacker, attackableTile)
-        val validatedEnvelope = envelope.copy(validated = true)
-        ChatWebSocket.requestMessageSend(
-            com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
-        )
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
-    }
-
-    // ════════════════════════════════════════
-    //  ConsumeUnit — dispatches by actionType
-    // ════════════════════════════════════════
-
-    /** Central handler for all unit-consuming actions.
-     *  Both host-validate and remote-apply paths converge here.
-     *  Returns true if the action was applied. */
-    private fun executeConsumeUnit(action: GameAction.ConsumeUnitAction): Boolean {
-        val unit = findUnitById(action.unitId) ?: return false
-        if (unit.isDestroyed || !unit.hasMovement()) return false
-        return when (action.actionType) {
-            "FoundCity" -> {
-                val tile = unit.currentTile
-                if (tile.isCityCenter() || !tile.canBeSettled(unit.civ)) return false
-                unit.civ.addCity(tile.position, unit)
-                unit.destroy()
-                true
-            }
-            // Delegate to original game logic — no manual reimplementation
-            "HurryResearch" -> UnitActions.invokeUnitAction(unit, UnitActionType.HurryResearch)
-            "HurryPolicy" -> UnitActions.invokeUnitAction(unit, UnitActionType.HurryPolicy)
-            "HurryWonder" -> UnitActions.invokeUnitAction(unit, UnitActionType.HurryWonder)
-            "HurryBuilding" -> UnitActions.invokeUnitAction(unit, UnitActionType.HurryBuilding)
-            "ConductTradeMission" -> UnitActions.invokeUnitAction(unit, UnitActionType.ConductTradeMission)
-            "DisbandUnit" -> {
-                unit.disband()
-                unit.civ.updateStatsForNextTurn()
-                true
-            }
-            "FoundReligion" -> {
-                unit.civ.religionManager.foundReligion(unit)
-                unit.consume()
-                true
-            }
-            "EnhanceReligion" -> {
-                unit.civ.religionManager.useProphetForEnhancingReligion(unit)
-                unit.consume()
-                true
-            }
-            else -> false
-        }
-    }
-
-    private fun hostValidateConsumeUnit(envelope: GameActionPacket) {
-        val action = envelope.action as? GameAction.ConsumeUnitAction ?: return
-        if (!executeConsumeUnit(action)) return
-        val validatedEnvelope = envelope.copy(validated = true)
-        ChatWebSocket.requestMessageSend(
-            com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
-        )
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
-    }
-
-    private fun applyRemoteConsumeUnit(action: GameAction.ConsumeUnitAction) {
-        executeConsumeUnit(action)
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
-    }
-
-    // ════════════════════════════════════════
-    //  UpdateUnit — dispatches by actionType
-    // ════════════════════════════════════════
-
-    /** Central handler for all unit state-change actions (unit survives). */
-    private fun executeUpdateUnit(action: GameAction.UpdateUnitAction): Boolean {
-        val unit = findUnitById(action.unitId) ?: return false
-        if (unit.isDestroyed) return false
-        return when (action.actionType) {
-            "Fortify" -> { unit.fortify(); true }
-            "FortifyUntilHealed" -> { unit.fortifyUntilHealed(); true }
-            "Pillage" -> {
-                val tile = unit.currentTile
-                if (!tile.canPillageTile() || tile.getImprovementToPillageName() == null) return false
-                val pillageAction = UnitActionsPillage.getPillageAction(unit, tile)?.action ?: return false
-                pillageAction()
-                true
-            }
-            "Upgrade" -> {
-                val upgradeTargetName = action.param ?: return false
-                if (!unit.hasMovement()) return false
-                val upgradedUnit = unit.civ.getEquivalentUnit(upgradeTargetName) ?: return false
-                if (!unit.upgrade.canUpgrade(unitToUpgradeTo = upgradedUnit)) return false
-                if (unit.civ.gold < unit.upgrade.getCostOfUpgrade(upgradedUnit)) return false
-                unit.upgrade.performUpgrade(upgradedUnit, isFree = false)
-                true
-            }
-            "SpreadReligion" -> {
-                val tile = unit.currentTile
-                val spreadReligion = UnitActionsReligion.getSpreadReligionActions(unit, tile)
-                    .firstOrNull()?.action ?: return false
-                spreadReligion()
-                true
-            }
-            "RemoveHeresy" -> {
-                val tile = unit.currentTile
-                val removeHeresy = UnitActionsReligion.getRemoveHeresyActions(unit, tile)
-                    .firstOrNull()?.action ?: return false
-                removeHeresy()
-                true
-            }
-            else -> false
-        }
-    }
-
-    private fun hostValidateUpdateUnit(envelope: GameActionPacket) {
-        val action = envelope.action as? GameAction.UpdateUnitAction ?: return
-        if (!executeUpdateUnit(action)) return
-        val validatedEnvelope = envelope.copy(validated = true)
-        ChatWebSocket.requestMessageSend(
-            com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
-        )
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
-    }
-
-    private fun applyRemoteUpdateUnit(action: GameAction.UpdateUnitAction) {
-        executeUpdateUnit(action)
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
-    }
-
-    // ════════════════════════════════════════
-    //  TriggerUnit — generic unique activation
-    // ════════════════════════════════════════
-
-    private fun hostValidateTriggerUnit(envelope: GameActionPacket) {
-        val action = envelope.action as? GameAction.TriggerUnitAction ?: return
-        val unit = findUnitById(action.unitId) ?: return
-        if (unit.isDestroyed) return
-        // Find the unique by matching its text against all unit uniques
-        val unique = unit.getUniques().firstOrNull { it.text == action.uniqueText } ?: return
-        val tile = unit.currentTile
-        val gameContext = com.unciv.models.ruleset.unique.GameContext(unit.civ, null, unit, tile)
-        val triggerFunction = com.unciv.models.ruleset.unique.UniqueTriggerActivation
-            .getTriggerFunction(unique, unit.civ, unit = unit, tile = tile) ?: return
-        repeat(unique.getUniqueMultiplier(gameContext)) { triggerFunction.invoke() }
-        com.unciv.ui.screens.worldscreen.unit.actions.UnitActionModifiers.activateSideEffects(unit, unique)
-        val validatedEnvelope = envelope.copy(validated = true)
-        ChatWebSocket.requestMessageSend(
-            com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
-        )
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
-    }
-
-    private fun applyRemoteTriggerUnit(action: GameAction.TriggerUnitAction) {
-        val unit = findUnitById(action.unitId) ?: return
-        if (unit.isDestroyed) return
-        val unique = unit.getUniques().firstOrNull { it.text == action.uniqueText } ?: return
-        val tile = unit.currentTile
-        val gameContext = com.unciv.models.ruleset.unique.GameContext(unit.civ, null, unit, tile)
-        val triggerFunction = com.unciv.models.ruleset.unique.UniqueTriggerActivation
-            .getTriggerFunction(unique, unit.civ, unit = unit, tile = tile) ?: return
-        repeat(unique.getUniqueMultiplier(gameContext)) { triggerFunction.invoke() }
-        com.unciv.ui.screens.worldscreen.unit.actions.UnitActionModifiers.activateSideEffects(unit, unique)
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
-    }
-
-    /** Get the [ICombatant] on a tile for city bombardment target resolution */
-    private fun getMapCombatantOfTile(tile: Tile): ICombatant? {
-        return (tile.getUnits().firstOrNull()?.let { MapUnitCombatant(it) }
-            ?: tile.getCity()?.let { CityCombatant(it) })
-    }
-
-    // ════════════════════════════════════════
+    // ──────────────────────────────────────
     //  Capture City
-    // ════════════════════════════════════════
-
+    // ──────────────────────────────────────
     private fun hostValidateCaptureCity(envelope: GameActionPacket) {
         val action = envelope.action as? GameAction.CaptureCityAction ?: return
         val city = findCityById(action.cityId) ?: run {
@@ -953,11 +656,10 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
             com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
         )
     }
-
     private fun applyRemoteCaptureCity(action: GameAction.CaptureCityAction) {
         val city = findCityById(action.cityId) ?: return
         val conquerer = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
-        if (city.civ.civName == action.civName) return // déjà vu — already under this civ
+        if (city.civ.civName == action.civName) return // déjà vu ─ already under this civ
 
         when (action.mode) {
             "Puppet" -> city.puppetCity(conquerer)
@@ -973,13 +675,11 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
             "Liberate" -> city.liberateCity(conquerer)
             "Destroy" -> city.destroyCity(true)
         }
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
     }
 
-    // ════════════════════════════════════════
-    //  Return Captured Unit (barbarian settler rescue)
-    // ════════════════════════════════════════
-
+    // ──────────────────────────────────────
+    //  Return Captured Unit (rescue unit from barbarian)
+    // ──────────────────────────────────────
     private fun hostValidateReturnCapturedUnit(envelope: GameActionPacket) {
         val action = envelope.action as? GameAction.ReturnCapturedUnitAction ?: return
         val unit = findUnitById(action.unitId) ?: return
@@ -991,7 +691,6 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
             com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
         )
     }
-
     private fun applyRemoteReturnCapturedUnit(action: GameAction.ReturnCapturedUnitAction) {
         val unit = findUnitById(action.unitId) ?: return
         if (unit.isDestroyed) return
@@ -1027,74 +726,11 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
         } else {
             BattleUnitCapture.captureOrConvertToWorker(unit, captor)
         }
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
     }
 
-    // ════════════════════════════════════════
-    //  Promote
-    // ════════════════════════════════════════
-
-    private fun performPromoteAction(action: GameAction.PromoteAction): Boolean {
-        val unit = findUnitById(action.unitId) ?: return false
-        if (unit.isDestroyed) return false
-        if (unit.promotions.getAvailablePromotions().none { it.name == action.promotionName }) return false
-        unit.promotions.addPromotion(action.promotionName)
-        return true
-    }
-
-    private fun hostValidatePromote(envelope: GameActionPacket) {
-        val action = envelope.action as? GameAction.PromoteAction ?: return
-        if (!performPromoteAction(action)) return
-        val validatedEnvelope = envelope.copy(validated = true)
-        ChatWebSocket.requestMessageSend(
-            com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
-        )
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
-    }
-
-    private fun applyRemotePromote(action: GameAction.PromoteAction) {
-        performPromoteAction(action)
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
-    }
-
-    // ════════════════════════════════════════
-    //  Purchase
-    // ════════════════════════════════════════
-
-    private fun hostValidatePurchase(envelope: GameActionPacket) {
-        val action = envelope.action as? GameAction.PurchaseAction ?: return
-        val city = findCityById(action.cityId) ?: return
-        val civ = city.civ
-        val stat = try { Stat.valueOf(action.stat) } catch (_: Exception) { return }
-        val construction = city.cityConstructions
-            .getConstruction(action.constructionName) as? INonPerpetualConstruction ?: return
-        val constructionBuyCost = construction.getStatBuyCost(city, stat) ?: return
-        if (!city.cityConstructions.isConstructionPurchaseAllowed(construction, stat, constructionBuyCost)) {
-            debug("Host rejected purchase: %s in %s", action.constructionName, action.cityId)
-            return
-        }
-        applyRemotePurchase(action)
-        val validatedEnvelope = envelope.copy(validated = true)
-        ChatWebSocket.requestMessageSend(
-            com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
-        )
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
-    }
-
-    private fun applyRemotePurchase(action: GameAction.PurchaseAction) {
-        val city = findCityById(action.cityId) ?: return
-        val civ = city.civ
-        val stat = try { Stat.valueOf(action.stat) } catch (_: Exception) { return }
-        // queuePosition removed (was only for queue ordering, not essential for broadcast)
-        // tileX/tileY removed (BuyTileAction covers tile purchases)
-        city.cityConstructions.purchaseConstruction(action.constructionName, -1, false, stat, null)
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
-    }
-
-    // ════════════════════════════════════════
+    // ──────────────────────────────────────
     //  Policy adoption
-    // ════════════════════════════════════════
-
+    // ──────────────────────────────────────
     private fun hostValidateAdoptPolicy(envelope: GameActionPacket) {
         val action = envelope.action as? GameAction.AdoptPolicyAction ?: return
         val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
@@ -1106,26 +742,23 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
             com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
         )
     }
-
     private fun applyRemoteAdoptPolicy(action: GameAction.AdoptPolicyAction) {
         val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
         val policy = worldScreen.gameInfo.ruleset.policies[action.policyName] ?: return
         if (civ.policies.isAdopted(policy.name)) return
         civ.policies.adopt(policy)
         civ.policies.shouldOpenPolicyPicker = false
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
     }
 
-    // ════════════════════════════════════════
+    // ──────────────────────────────────────
     //  Choose Free Tech (Great Library, etc.)
-    // ════════════════════════════════════════
-
+    // ──────────────────────────────────────
     private fun hostValidateChooseFreeTech(envelope: GameActionPacket) {
         val action = envelope.action as? GameAction.ChooseFreeTechAction ?: return
         val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
         val tech = worldScreen.gameInfo.ruleset.technologies[action.techName] ?: return
         if (!civ.tech.canBeResearched(tech.name)) return
-        // Decrement on authoritative host state — sender already decremented locally
+        // Decrement on authoritative host state ─ sender already decremented locally
         civ.tech.freeTechs--
         applyRemoteChooseFreeTech(action)
         val validatedEnvelope = envelope.copy(validated = true)
@@ -1133,21 +766,18 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
             com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
         )
     }
-
     private fun applyRemoteChooseFreeTech(action: GameAction.ChooseFreeTechAction) {
         val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
         val tech = worldScreen.gameInfo.ruleset.technologies[action.techName] ?: return
         if (civ.tech.isResearched(tech.name)) return
-        // Use addTechnology directly — the sender already decremented freeTechs locally
+        // Use addTechnology directly ─ the sender already decremented freeTechs locally
         civ.tech.addTechnology(tech.name)
         civ.tech.updateResearchProgress()
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
     }
 
-    // ════════════════════════════════════════
+    // ──────────────────────────────────────
     //  Pantheon founding
-    // ════════════════════════════════════════
-
+    // ──────────────────────────────────────
     private fun hostValidateFoundPantheon(envelope: GameActionPacket) {
         val action = envelope.action as? GameAction.FoundPantheonAction ?: return
         val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
@@ -1159,19 +789,16 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
             com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
         )
     }
-
     private fun applyRemoteFoundPantheon(action: GameAction.FoundPantheonAction) {
         val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
         val belief = worldScreen.gameInfo.ruleset.beliefs[action.beliefName] ?: return
         if (civ.religionManager.religionState >= ReligionState.Pantheon) return
         civ.religionManager.chooseBeliefs(listOf(belief), useFreeBeliefs = true)
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
     }
 
-    // ════════════════════════════════════════
+    // ──────────────────────────────────────
     //  Create Improvement (work boat, instant)
-    // ════════════════════════════════════════
-
+    // ──────────────────────────────────────
     private fun hostValidateCreateImprovement(envelope: GameActionPacket) {
         val action = envelope.action as? GameAction.CreateImprovementAction ?: return
         val unit = findUnitById(action.unitId) ?: return
@@ -1184,7 +811,6 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
             com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
         )
     }
-
     private fun applyRemoteCreateImprovement(action: GameAction.CreateImprovementAction) {
         val unit = findUnitById(action.unitId) ?: return
         if (unit.isDestroyed) return
@@ -1192,13 +818,11 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
         val tile = unit.currentTile
         tile.setImprovement(improvement, unit.civ, unit)
         unit.destroy()
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
     }
 
-    // ════════════════════════════════════════
+    // ──────────────────────────────────────
     //  Spawn Unit (great person picker, etc.)
-    // ════════════════════════════════════════
-
+    // ──────────────────────────────────────
     private fun hostValidateSpawnUnit(envelope: GameActionPacket) {
         val action = envelope.action as? GameAction.SpawnUnitAction ?: return
         val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
@@ -1219,13 +843,12 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
             com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
         )
     }
-
     private fun applyRemoteSpawnUnit(action: GameAction.SpawnUnitAction) {
         val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
         if (civ.cities.isEmpty()) return
         val city = action.cityId?.let { id -> civ.cities.firstOrNull { it.id == id } }
         civ.units.addUnit(action.unitName, city ?: civ.getCapital() ?: civ.cities.firstOrNull())
-        // Apply great person counter decrements — these were incremented on both host and non-host
+        // Apply great person counter decrements ─ these were incremented on both host and non-host
         // by unique triggers from policy adoption / wonder completion, so both must decrement.
         if (action.freeGreatPeopleDecrement > 0)
             civ.greatPeople.freeGreatPeople -= action.freeGreatPeopleDecrement
@@ -1233,13 +856,11 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
             civ.greatPeople.mayaLimitedFreeGP -= action.mayaLimitedFreeGPDecrement
         for (unitName in action.longCountGPPoolRemoval)
             civ.greatPeople.longCountGPPool.remove(unitName)
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
     }
 
-    // ════════════════════════════════════════
+    // ──────────────────────────────────────
     //  Trade / Diplomacy
-    // ════════════════════════════════════════
-
+    // ──────────────────────────────────────
     private fun hostValidateSendTradeRequest(envelope: GameActionPacket) {
         val action = envelope.action as? GameAction.SendTradeRequestAction ?: return
         applyRemoteSendTradeRequest(action)
@@ -1248,7 +869,6 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
             com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
         )
     }
-
     private fun applyRemoteSendTradeRequest(action: GameAction.SendTradeRequestAction) {
         val targetCiv = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.targetCiv } ?: return
         targetCiv.tradeRequests.removeAll { it.requestingCiv == action.requestingCiv }
@@ -1265,7 +885,6 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
             com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
         )
     }
-
     private fun applyRemoteAcceptTrade(action: GameAction.AcceptTradeAction) {
         val acceptingCiv = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.acceptingCiv } ?: return
         val requestingCiv = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.requestingCiv } ?: return
@@ -1274,53 +893,31 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
         tradeLogic.currentTrade.set(trade)
         tradeLogic.acceptTrade()
         acceptingCiv.tradeRequests.removeAll { it.requestingCiv == action.requestingCiv }
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
     }
 
     // ──────────────────────────────────────
-    //  City-State: Tribute Gold
+    //  City-State: Take tribute (Gold or Worker)
     // ──────────────────────────────────────
-
-    private fun hostValidateTributeGold(envelope: GameActionPacket) {
-        val action = envelope.action as? GameAction.TributeGoldAction ?: return
-        applyRemoteTributeGold(action)
+    private fun hostValidateTakeTribute(envelope: GameActionPacket) {
+        val action = envelope.action as? GameAction.TakeTributeAction ?: return
+        applyRemoteTakeTribute(action)
         val validatedEnvelope = envelope.copy(validated = true)
         ChatWebSocket.requestMessageSend(
             com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
         )
     }
-
-    private fun applyRemoteTributeGold(action: GameAction.TributeGoldAction) {
-        val cs = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.cityStateCivName } ?: return
+    private fun applyRemoteTakeTribute(action: GameAction.TakeTributeAction) {
+        val cs = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.cityStateName } ?: return
         val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
-        cs.cityStateFunctions.tributeGold(civ)
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
-    }
-
-    // ──────────────────────────────────────
-    //  City-State: Tribute Worker
-    // ──────────────────────────────────────
-
-    private fun hostValidateTributeWorker(envelope: GameActionPacket) {
-        val action = envelope.action as? GameAction.TributeWorkerAction ?: return
-        applyRemoteTributeWorker(action)
-        val validatedEnvelope = envelope.copy(validated = true)
-        ChatWebSocket.requestMessageSend(
-            com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
-        )
-    }
-
-    private fun applyRemoteTributeWorker(action: GameAction.TributeWorkerAction) {
-        val cs = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.cityStateCivName } ?: return
-        val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
-        cs.cityStateFunctions.tributeWorker(civ)
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
+        when (action.tributeType) {
+            "Gold" -> cs.cityStateFunctions.tributeGold(civ)
+            "Worker" -> cs.cityStateFunctions.tributeWorker(civ)
+        }
     }
 
     // ──────────────────────────────────────
     //  City-State: Gold Gift
     // ──────────────────────────────────────
-
     private fun hostValidateGoldGift(envelope: GameActionPacket) {
         val action = envelope.action as? GameAction.GoldGiftAction ?: return
         applyRemoteGoldGift(action)
@@ -1329,18 +926,15 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
             com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
         )
     }
-
     private fun applyRemoteGoldGift(action: GameAction.GoldGiftAction) {
-        val cs = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.cityStateCivName } ?: return
+        val cs = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.cityStateName } ?: return
         val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
         cs.cityStateFunctions.receiveGoldGift(civ, action.giftAmount)
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
     }
 
     // ──────────────────────────────────────
     //  City-State: Set Protection
     // ──────────────────────────────────────
-
     private fun hostValidateSetProtection(envelope: GameActionPacket) {
         val action = envelope.action as? GameAction.SetProtectionAction ?: return
         applyRemoteSetProtection(action)
@@ -1349,19 +943,16 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
             com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
         )
     }
-
     private fun applyRemoteSetProtection(action: GameAction.SetProtectionAction) {
-        val cs = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.cityStateCivName } ?: return
+        val cs = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.cityStateName } ?: return
         val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
         if (action.protect) cs.cityStateFunctions.addProtectorCiv(civ)
         else cs.cityStateFunctions.removeProtectorCiv(civ)
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
     }
 
     // ──────────────────────────────────────
     //  City-State: Gift Improvement
     // ──────────────────────────────────────
-
     private fun hostValidateGiftImprovement(envelope: GameActionPacket) {
         val action = envelope.action as? GameAction.GiftImprovementAction ?: return
         applyRemoteGiftImprovement(action)
@@ -1370,23 +961,20 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
             com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
         )
     }
-
     private fun applyRemoteGiftImprovement(action: GameAction.GiftImprovementAction) {
-        val cs = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.cityStateCivName } ?: return
+        val cs = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.cityStateName } ?: return
         val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
-        val tile = worldScreen.gameInfo.tileMap[action.tileX, action.tileY] ?: return
+        val tile = worldScreen.gameInfo.tileMap[action.tileX, action.tileY]
         val improvement = worldScreen.gameInfo.tileMap.ruleset!!.tileImprovements[action.improvementName] ?: return
         civ.addGold(-200)
         tile.stopWorkingOnImprovement()
         tile.setImprovement(improvement)
         cs.cache.updateCivResources()
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
     }
 
     // ──────────────────────────────────────
     //  City-State: Diplomatic Marriage
     // ──────────────────────────────────────
-
     private fun hostValidateDiplomaticMarriage(envelope: GameActionPacket) {
         val action = envelope.action as? GameAction.DiplomaticMarriageAction ?: return
         applyRemoteDiplomaticMarriage(action)
@@ -1395,18 +983,15 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
             com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
         )
     }
-
     private fun applyRemoteDiplomaticMarriage(action: GameAction.DiplomaticMarriageAction) {
-        val cs = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.cityStateCivName } ?: return
+        val cs = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.cityStateName } ?: return
         val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
         cs.cityStateFunctions.diplomaticMarriage(civ)
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
     }
 
     // ──────────────────────────────────────
     //  Religion: Complete Found Religion (picker completion)
     // ──────────────────────────────────────
-
     private fun hostValidateCompleteFoundReligion(envelope: GameActionPacket) {
         val action = envelope.action as? GameAction.CompleteFoundReligionAction ?: return
         applyRemoteCompleteFoundReligion(action)
@@ -1415,7 +1000,6 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
             com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
         )
     }
-
     private fun applyRemoteCompleteFoundReligion(action: GameAction.CompleteFoundReligionAction) {
         val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
         civ.religionManager.foundReligion(action.displayName, action.religionName)
@@ -1423,13 +1007,11 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
             worldScreen.gameInfo.ruleset.beliefs[name]
         }
         civ.religionManager.chooseBeliefs(beliefs)
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
     }
 
     // ──────────────────────────────────────
     //  Religion: Complete Enhance Religion (picker completion)
     // ──────────────────────────────────────
-
     private fun hostValidateCompleteEnhanceReligion(envelope: GameActionPacket) {
         val action = envelope.action as? GameAction.CompleteEnhanceReligionAction ?: return
         applyRemoteCompleteEnhanceReligion(action)
@@ -1438,20 +1020,17 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
             com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
         )
     }
-
     private fun applyRemoteCompleteEnhanceReligion(action: GameAction.CompleteEnhanceReligionAction) {
         val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
         val beliefs = action.beliefNames.mapNotNull { name ->
             worldScreen.gameInfo.ruleset.beliefs[name]
         }
         civ.religionManager.chooseBeliefs(beliefs)
-        Gdx.app.postRunnable { worldScreen.shouldUpdate = true }
     }
 
     // ──────────────────────────────────────
     //  Host-only: end-turn tracking
     // ──────────────────────────────────────
-
     fun isHost(): Boolean {
         val hostId = worldScreen.gameInfo.gameParameters.hostPlayerId
         return UncivGame.Current.settings.multiplayer.getUserId() == hostId
@@ -1488,7 +1067,7 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
 
     /** Host: run turn advancement, upload, and broadcast */
     private fun hostAdvanceTurn() {
-        debug("All players finished — advancing turn")
+        debug("All players finished: advancing turn")
         Concurrency.runOnNonDaemonThreadPool("SimultaneousTurnAdvance") {
             val gameClone = worldScreen.gameInfo.clone()
             gameClone.setTransients()
@@ -1551,7 +1130,7 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
 
             SimultaneousTurnProcessor.processAdvance(gameClone)
 
-            // Upload the new game state (existing pipeline — suspend function, OK in coroutine)
+            // Upload the new game state (existing pipeline ─ suspend function, OK in coroutine)
             UncivGame.Current.onlineMultiplayer.updateGame(gameClone)
 
             // Broadcast to all that the turn has advanced
@@ -1570,7 +1149,7 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
         }
     }
 
-    /** Called when TurnAdvanced is received — non-host clients download the new game */
+    /** Called when TurnAdvanced is received ─ non-host clients download the new game */
     private fun onTurnAdvanced(response: Response.TurnAdvanced) {
         if (isHost()) return // host already loaded it
         debug("Turn advanced to %s, downloading new game state", response.newTurns)
