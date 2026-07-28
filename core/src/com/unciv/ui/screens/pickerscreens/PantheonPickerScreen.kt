@@ -8,6 +8,7 @@ import com.unciv.models.ruleset.BeliefType
 import com.unciv.models.ruleset.unique.GameContext
 import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.models.translations.tr
+import com.unciv.logic.multiplayer.SimultaneousModeInterceptor
 
 class PantheonPickerScreen(
     choosingCiv: Civilization
@@ -33,9 +34,7 @@ class PantheonPickerScreen(
         }
 
         setOKAction("Choose a pantheon") {
-            if (gameInfo.gameParameters.isSimultaneousGame)
-                UncivGame.Current.worldScreen?.actionBroadcastManager?.sendGameAction(GameAction.FoundPantheonAction(selectedPantheon!!.name, choosingCiv.civName))
-            else
+            if (!SimultaneousModeInterceptor.interceptFoundPantheon(selectedPantheon!!.name, choosingCiv.civName))
                 chooseBeliefs(listOf(selectedPantheon!!), useFreeBeliefs = usingFreeBeliefs())
         }
     }

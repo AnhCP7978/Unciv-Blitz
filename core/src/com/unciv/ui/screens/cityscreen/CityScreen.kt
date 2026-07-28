@@ -309,7 +309,7 @@ class CityScreen(
             val annexCityButton = "Annex city".toTextButton()
             annexCityButton.labelCell.pad(10f)
             annexCityButton.onClick {
-                city.annexCity()
+                if (!SimultaneousModeInterceptor.interceptAnnexCity(city.id, city.civ.civName)) city.annexCity()
                 update()
             }
             if (!canChangeState) annexCityButton.disable()

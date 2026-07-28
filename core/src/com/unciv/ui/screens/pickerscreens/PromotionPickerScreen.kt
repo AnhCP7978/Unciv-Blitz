@@ -119,17 +119,17 @@ class PromotionPickerScreen private constructor(
         val path = tree.getPathTo(button.node.promotion)
         SoundPlayer.playRepeated(UncivSound.Promote, path.size.coerceAtMost(2))
 
-        val promotionNames = path.map { it.name }
-        for (promotionName in promotionNames) {
-            // In simultaneous multiplayer, skip local application to prevent double-apply
-            if (SimultaneousModeInterceptor.interceptPromote(unit.id, promotionName)) {
-                onChange?.invoke()
-                game.popScreen()
-                return
-            }
-            // Non-simultaneous: apply locally
-            unit.promotions.addPromotion(promotionName)
+        val existingPromotions = unit.promotions.promotions
+        val promotionNames = path.map { it.name } .filter { it !in existingPromotions } // Only get promotions that didn't exist yet
+
+        if (SimultaneousModeInterceptor.interceptPromoteAction(unit.id, promotionNames)) {
+            onChange?.invoke()
+            game.popScreen()
+            return
         }
+
+        for (promotionName in promotionNames) // Non-simultaneous: apply locally
+            unit.promotions.addPromotion(promotionName)
 
         onChange?.invoke()
 

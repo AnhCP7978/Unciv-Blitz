@@ -258,7 +258,10 @@ class GameInfo : IsPartOfGameInfoSerialization, HasGameInfoSerializationVersion 
     @Readonly // Resolve a unit by its globally unique id across all civilizations. (Only for Simultaneous mode)
     fun getUnitById(unitId: Int): MapUnit? = civilizations.asSequence().flatMap { it.units.getCivUnits() }.firstOrNull { it.id == unitId }
 
-    fun getCurrentPlayerCivilization() = currentPlayerCiv
+    fun getCurrentPlayerCivilization(): Civilization {
+        if (gameParameters.isSimultaneousGame) return getPlayerToViewAs() // Perhaps we need a dedicated function for simultaneous mode?
+        return currentPlayerCiv
+    }
     fun getCivilizationsAsPreviews() = civilizations.map { it.asPreview() }.toMutableList()
     /** Get barbarian civ
      *  @throws NoSuchElementException in no-barbarians games! */

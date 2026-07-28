@@ -20,7 +20,6 @@ import com.unciv.logic.map.*
 import com.unciv.logic.map.mapunit.MapUnit
 import com.unciv.logic.map.mapunit.movement.UnitMovement
 import com.unciv.logic.map.tile.Tile
-import com.unciv.logic.multiplayer.SimultaneousModeInterceptor
 import com.unciv.models.Spy
 import com.unciv.models.UncivSound
 import com.unciv.ui.audio.SoundPlayer
@@ -46,7 +45,7 @@ import com.unciv.utils.Log
 import com.unciv.utils.launchOnGLThread
 import yairm210.purity.annotations.Readonly
 import java.lang.Float.max
-
+import com.unciv.logic.multiplayer.SimultaneousModeInterceptor
 
 class WorldMapHolder(
     internal val worldScreen: WorldScreen,
@@ -257,8 +256,8 @@ class WorldMapHolder(
                     .firstOrNull { it.tileToAttack == tile }
             if (unit.canAttack() && attackableTile != null) {
                 /** ****** Right-click Attack ****** */
-                if (SimultaneousModeInterceptor.interceptAttack(unit.id, attackableTile.tileToAttack)) return
                 val attacker = MapUnitCombatant(unit)
+                if (SimultaneousModeInterceptor.interceptAttack(attacker, attackableTile.tileToAttack)) return
                 if (!Battle.movePreparingAttack(attacker, attackableTile)) return
                 if (!SoundPlayer.play(UncivSound(attacker.getName())))
                     SoundPlayer.play(attacker.getAttackSound())

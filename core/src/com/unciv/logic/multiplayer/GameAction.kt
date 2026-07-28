@@ -51,6 +51,12 @@ sealed interface GameAction {
         val unitId: Int,
         val unitToUpgradeTo: String
     ) : GameAction
+    @Serializable
+    @SerialName("transformUnit")
+    data class TransformUnitAction(
+        val unitId: Int,
+        val unitToTransformTo: String,
+    ) : GameAction
 
     @Serializable
     @SerialName("triggerUnique")
@@ -63,11 +69,11 @@ sealed interface GameAction {
     @Serializable
     @SerialName("promote")
     data class PromoteAction(
-        val unitId: Int,
-        val promotionName: String
+        val unitId: Int,                    
+        val promotionNames: List<String> // Whenever promote action is intercepted, we only send what haven't exist yet in bulk
     ) : GameAction
 
-    /*  Create a tile improvement (work boat / oil rig). Consumes the unit after applying the improvement */
+    /* One-shot improvement (work boats, great people improvements, etc.) */
     @Serializable
     @SerialName("createImprovement")
     data class CreateImprovementAction(
@@ -117,7 +123,14 @@ sealed interface GameAction {
     data class CaptureCityAction(
         val cityId: String,
         val civName: String, // conquerer civName
-        val mode: String, // "Puppet", "Annex", "Raze", "Liberate", ("Destroy" for one-city challenge mode)
+        val mode: String, // "Puppet", "Annex", "Raze", "Liberate", (& "Destroy" for one-city challenge mode)
+    ) : GameAction
+
+    @Serializable
+    @SerialName("annexCity") // Sub-action for CaptureCityAction... could merge in the future?
+    data class AnnexCityAction(
+        val cityId: String,
+        val civName: String,
     ) : GameAction
 
     // ═══════════════════════════════════════════

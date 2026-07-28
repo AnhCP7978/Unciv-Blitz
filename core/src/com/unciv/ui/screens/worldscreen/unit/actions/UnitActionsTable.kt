@@ -196,7 +196,7 @@ class UnitActionsTable(val worldScreen: WorldScreen) : Table() {
 
     private fun activateAction(unitAction: UnitAction, unit: MapUnit) {
         // Simultanous mode: send action to [ActionBroadcastManager] instead of invoke locally
-        if (!SimultaneousModeInterceptor.interceptUnitAction(unit, unitAction))
+        if (!SimultaneousModeInterceptor.interceptUnitAction(unit.id, unitAction))
             unitAction.action!!.invoke()
 
         worldScreen.shouldUpdate = true

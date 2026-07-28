@@ -26,6 +26,7 @@ import com.unciv.ui.components.extensions.packIfNeeded
 import com.unciv.ui.components.extensions.surroundWithCircle
 import com.unciv.ui.images.ImageGetter
 import com.unciv.ui.popups.AskTextPopup
+import com.unciv.logic.multiplayer.SimultaneousModeInterceptor
 
 class ReligiousBeliefsPickerScreen (
     choosingCiv: Civilization,
@@ -79,27 +80,18 @@ class ReligiousBeliefsPickerScreen (
             if (pickIconAndName) "Choose a Religion"
             else "Enhance [${currentReligion.getReligionDisplayName()}]"
         ) {
-            if (civInfo.gameInfo.gameParameters.isSimultaneousGame) {
-                val worldScreen = UncivGame.Current.worldScreen
-                val broadcastManager = worldScreen?.actionBroadcastManager
-                if (broadcastManager != null) {
-                    val beliefNames = beliefsToChoose.map { it.belief!!.name }
-                    if (civInfo.religionManager.religionState == ReligionState.FoundingReligion) {
-                        broadcastManager.sendGameAction(
-                            GameAction.CompleteFoundReligionAction(civInfo.civName, displayName!!, religionName!!, beliefNames)
-                        )
-                    } else {
-                        broadcastManager.sendGameAction(
-                            GameAction.CompleteEnhanceReligionAction(civInfo.civName, beliefNames)
-                        )
-                    }
-                    // Need to dismiss this screen — the validated echo will update state
+            val beliefNames = beliefsToChoose.map { it.belief!!.name }
+            if (civInfo.religionManager.religionState == ReligionState.FoundingReligion) {
+                if (SimultaneousModeInterceptor.interceptCompleteFoundReligion(civInfo.civName, displayName!!, religionName!!, beliefNames)) {
                     UncivGame.Current.popScreen()
                     return@setOKAction
                 }
-            }
-            if (civInfo.religionManager.religionState == ReligionState.FoundingReligion)
                 civInfo.religionManager.foundReligion(displayName!!, religionName!!)
+            }
+            else if (SimultaneousModeInterceptor.interceptCompleteFoundReligion(civInfo.civName, displayName!!, religionName!!, beliefNames)) {
+                UncivGame.Current.popScreen()
+                return@setOKAction
+            }
             chooseBeliefs(beliefsToChoose.map { it.belief!! }, usingFreeBeliefs())
         }
     }

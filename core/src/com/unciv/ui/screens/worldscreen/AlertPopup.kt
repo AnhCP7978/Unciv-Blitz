@@ -31,7 +31,6 @@ import com.unciv.ui.components.extensions.toTextButton
 import com.unciv.ui.components.input.KeyboardBinding
 import com.unciv.ui.components.input.keyShortcuts
 import com.unciv.ui.components.input.onActivation
-import com.unciv.logic.multiplayer.SimultaneousModeInterceptor
 import com.unciv.ui.images.ImageGetter
 import com.unciv.ui.popups.Popup
 import com.unciv.ui.screens.diplomacyscreen.LeaderIntroTable
@@ -39,6 +38,7 @@ import com.unciv.ui.screens.victoryscreen.VictoryScreen
 import yairm210.purity.annotations.Readonly
 import java.util.EnumSet
 import kotlin.text.ifEmpty
+import com.unciv.logic.multiplayer.SimultaneousModeInterceptor
 
 /**
  * [Popup] communicating events other than trade offers to the player.
@@ -207,12 +207,6 @@ class AlertPopup(
         addQuestionAboutTheCity(city.name)
         val conqueringCiv = gameInfo.getCurrentPlayerCivilization()
 
-        fun broadcastCapture(mode: String) {
-            if (gameInfo.gameParameters.isSimultaneousGame)
-                worldScreen.actionBroadcastManager
-                    ?.sendGameAction(GameAction.CaptureCityAction(city.id, conqueringCiv.civName, mode))
-        }
-
         if (city.foundingCivObject != null
                 && city.civ != city.foundingCivObject // can't liberate if the city actually belongs to those guys
                 && conqueringCiv != city.foundingCivObject) { // or belongs originally to us
@@ -220,23 +214,25 @@ class AlertPopup(
             addSeparator()
         }
 
+        fun broadcastCapture(mode: String): Boolean {
+            return SimultaneousModeInterceptor.interceptCaptureCity(city.id, conqueringCiv.civName, mode)
+        }
         if (conqueringCiv.isOneCityChallenger()) {
             addDestroyOption {
-                city.puppetCity(conqueringCiv)
-                city.destroyCity()
-                broadcastCapture("Destroy")
+                if (!broadcastCapture("Destroy")) {
+                    city.puppetCity(conqueringCiv)
+                    city.destroyCity()
+                }
             }
         } else {
             val mayAnnex = !conqueringCiv.hasUnique(UniqueType.MayNotAnnexCities)
             addAnnexOption(city, mayAnnex = mayAnnex) {
-                city.puppetCity(conqueringCiv)
-                broadcastCapture("Annex")
+                if (!broadcastCapture("Annex")) city.puppetCity(conqueringCiv)
             }
             addSeparator()
 
             addPuppetOption(mayAnnex = mayAnnex) {
-                city.puppetCity(conqueringCiv)
-                broadcastCapture("Puppet")
+                if (!broadcastCapture("Puppet")) city.puppetCity(conqueringCiv)
             }
             addSeparator()
 
@@ -630,11 +626,10 @@ class AlertPopup(
     private fun addLiberateOption(city: City, conqueringCiv: Civilization) {
         val button = "Liberate (city returns to [originalOwner])".fillPlaceholders(city.foundingCivObject!!.civName).toTextButton()
         button.onActivation {
-            city.liberateCity(conqueringCiv)
-            if (gameInfo.gameParameters.isSimultaneousGame)
-                worldScreen.actionBroadcastManager
-                    ?.sendGameAction(GameAction.CaptureCityAction(city.id, conqueringCiv.civName, "Liberate"))
-            close()
+            if (!SimultaneousModeInterceptor.interceptCaptureCity(city.id, conqueringCiv.civName, "Liberate")) {
+                city.liberateCity(conqueringCiv)
+                close()
+            }
         }
         button.keyShortcuts.add('l')
         add(button).row()
@@ -648,13 +643,12 @@ class AlertPopup(
             if (!canRaze) disable()
             else {
                 onActivation {
-                    city.puppetCity(conqueringCiv)
-                    if (mayAnnex) { city.annexCity() }
-                    city.isBeingRazed = true
-                    if (gameInfo.gameParameters.isSimultaneousGame)
-                        worldScreen.actionBroadcastManager
-                            ?.sendGameAction(GameAction.CaptureCityAction(city.id, conqueringCiv.civName, "Raze"))
-                    close()
+                    if (!SimultaneousModeInterceptor.interceptCaptureCity(city.id, conqueringCiv.civName, "Raze")) {
+                        city.puppetCity(conqueringCiv)
+                        if (mayAnnex) { city.annexCity() }
+                        city.isBeingRazed = true
+                        close()
+                    }
                 }
                 keyShortcuts.add('r')
             }
@@ -685,8 +679,7 @@ class AlertPopup(
                 unit = viewingCiv.units.getUnitById(unitId)
             }
         }
-        
-        
+
         val event = gameInfo.ruleset.events[eventName] ?: return false
         val render = RenderEvent(event, worldScreen, unit) { close() }
         if (!render.isValid) return false

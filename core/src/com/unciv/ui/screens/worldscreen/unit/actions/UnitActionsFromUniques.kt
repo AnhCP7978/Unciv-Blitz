@@ -317,13 +317,10 @@ object UnitActionsFromUniques {
 
         return UnitAction(UnitActionType.CreateImprovement, useFrequency, "Create [${improvement.name}]",
             action = {
-                if (SimultaneousModeInterceptor.interceptCreateImprovement(unit.id, improvement.name)) {
-                    Unit // If you delete this, you get "Argument type mismatch: actual type is 'Function0<Unit?>?', but 'Function0<Unit>?' was expected."
-                } else {
-                    tile.setImprovement(improvement, unit.civ, unit)
-                    unit.destroy() // Modders may wish for a nondestructive way, but that should be another Unique
-                }
-            }.takeIf { unit.hasMovement() })
+                tile.setImprovement(improvement, unit.civ, unit)
+                unit.destroy() // Modders may wish for a nondestructive way, but that should be another Unique
+            }.takeIf { unit.hasMovement() }
+        )
     }
 
     // Not internal: Used in SpecificUnitAutomation
@@ -356,14 +353,10 @@ object UnitActionsFromUniques {
                     ),
                     associatedUnique = unique,
                     action = {
-                        if (SimultaneousModeInterceptor.interceptCreateImprovement(unit.id, improvement.name)) {
-                            Unit // Same as above
-                        } else {
-                            val unitTile = unit.getTile()
-                            unitTile.setImprovement(improvement, unit.civ, unit)
-                            unit.civ.cache.updateViewableTiles() // to update 'last seen improvement'
-                            UnitActionModifiers.activateSideEffects(unit, unique)
-                        }
+                        val unitTile = unit.getTile()
+                        unitTile.setImprovement(improvement, unit.civ, unit)
+                        unit.civ.cache.updateViewableTiles() // to update 'last seen improvement'
+                        UnitActionModifiers.activateSideEffects(unit, unique)
                     }.takeIf {
                         resourcesAvailable
                             && unit.hasMovement()

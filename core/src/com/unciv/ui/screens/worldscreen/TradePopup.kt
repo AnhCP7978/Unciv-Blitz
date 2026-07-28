@@ -21,6 +21,7 @@ import yairm210.purity.annotations.Readonly
 import kotlin.math.max
 import kotlin.math.min
 import com.unciv.ui.components.widgets.AutoScrollPane as ScrollPane
+import com.unciv.logic.multiplayer.SimultaneousModeInterceptor
 
 /* TODO:
     different Notification wording for peace treaties?
@@ -87,17 +88,14 @@ class TradePopup(worldScreen: WorldScreen) : Popup(worldScreen) {
         addGoodSizedLabel(nation.tradeRequest).pad(15f).row()
 
         addButton("Sounds good!", 'y') {
-            if (viewingCiv.gameInfo.gameParameters.isSimultaneousGame) {
-                worldScreen.actionBroadcastManager
-                    ?.sendGameAction(GameAction.AcceptTradeAction(viewingCiv.civName, requestingCiv.civName, trade.toTradeData()))
-            } else {
+            if (!SimultaneousModeInterceptor.interceptAcceptTrade(viewingCiv.civName, requestingCiv.civName, trade.toTradeData())) {
                 val tradeLogic = TradeLogic(viewingCiv, requestingCiv)
                 tradeLogic.currentTrade.set(trade)
                 tradeLogic.acceptTrade()
+                TradeThanksPopup(leaderIntroTable, worldScreen)
+                requestingCiv.addNotification("[${viewingCiv.civName}] has accepted your trade request", NotificationCategory.Trade, viewingCiv.civName, NotificationIcon.Trade)
             }
             close()
-            TradeThanksPopup(leaderIntroTable, worldScreen)
-            requestingCiv.addNotification("[${viewingCiv.civName}] has accepted your trade request", NotificationCategory.Trade, viewingCiv.civName, NotificationIcon.Trade)
         }.row()
 
         addButton("Not this time.", 'n') {

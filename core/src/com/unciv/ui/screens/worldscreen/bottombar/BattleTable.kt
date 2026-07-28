@@ -33,7 +33,6 @@ import com.unciv.ui.components.fonts.Fonts
 import com.unciv.ui.components.input.onClick
 import com.unciv.ui.components.widgets.AutoScrollPane
 import com.unciv.ui.components.widgets.UnitIconGroup
-import com.unciv.logic.multiplayer.SimultaneousModeInterceptor
 import com.unciv.ui.images.ImageGetter
 import com.unciv.ui.screens.basescreen.BaseScreen
 import com.unciv.ui.screens.worldscreen.UndoHandler.Companion.clearUndoCheckpoints
@@ -44,6 +43,8 @@ import com.unciv.utils.DebugUtils
 import yairm210.purity.annotations.Readonly
 import kotlin.math.max
 import kotlin.math.roundToInt
+
+import com.unciv.logic.multiplayer.SimultaneousModeInterceptor
 
 class BattleTable(val worldScreen: WorldScreen) : Table() {
     init {
@@ -342,12 +343,7 @@ class BattleTable(val worldScreen: WorldScreen) : Table() {
         if (!SoundPlayer.play(UncivSound(attacker.getName())))
             SoundPlayer.play(attacker.getAttackSound())
 
-        val attackerId = when (attacker) {
-            is MapUnitCombatant -> attacker.unit.id
-            is CityCombatant -> attacker.city.id
-            else -> null
-        }
-        if (attackerId != null && SimultaneousModeInterceptor.interceptAttack(attackerId, attackableTile.tileToAttack)) return
+        if (SimultaneousModeInterceptor.interceptAttack(attacker, attackableTile.tileToAttack)) return
 
         val (damageToDefender, damageToAttacker) = Battle.attackOrNuke(attacker, attackableTile)
 

@@ -41,6 +41,7 @@ import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
+import com.unciv.logic.multiplayer.SimultaneousModeInterceptor
 
 private enum class PolicyColors(
     val default: Color
@@ -667,18 +668,15 @@ class PolicyPickerScreen(
         // Evil people clicking on buttons too fast to confuse the screen - #4977
         if (!policy.isPickable(viewingCiv, canChangeState)) return
 
-        if (viewingCiv.gameInfo.gameParameters.isSimultaneousGame) {
-            com.unciv.UncivGame.Current.worldScreen?.actionBroadcastManager
-                ?.sendGameAction(GameAction.AdoptPolicyAction(policy.name, viewingCiv.civName))
+        if (SimultaneousModeInterceptor.interceptAdoptPolicy(policy.name, viewingCiv.civName)) {
             game.popScreen()
-        } else {
-            viewingCiv.policies.adopt(policy)
-
-            // If we've moved to another screen in the meantime (great person pick, victory screen) ignore this
-            // update policies
-            if (game.screen !is PolicyPickerScreen) game.popScreen()
-            else game.replaceCurrentScreen(recreate())
+            return
         }
+
+        viewingCiv.policies.adopt(policy)
+        // If we've moved to another screen in the meantime (great person pick, victory screen) ignore this update policies
+        if (game.screen !is PolicyPickerScreen) game.popScreen()
+        else game.replaceCurrentScreen(recreate())
     }
 
     override fun recreate(): BaseScreen {

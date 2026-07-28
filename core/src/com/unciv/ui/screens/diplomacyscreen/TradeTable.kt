@@ -13,6 +13,7 @@ import com.unciv.ui.components.input.onClick
 import com.unciv.ui.screens.basescreen.BaseScreen
 import com.unciv.logic.multiplayer.GameAction
 import com.unciv.logic.multiplayer.toTradeData
+import com.unciv.logic.multiplayer.SimultaneousModeInterceptor
 
 class TradeTable(
     private val civ: Civilization,
@@ -67,23 +68,18 @@ class TradeTable(
                 // Check if we require more gold from them
                 if (newCurrentPlayerGold < 0) {
                     offerColumnsTable.addOffer( tradeLogic.theirAvailableOffers.first { it.type == TradeOfferType.Gold }
-                            .copy(amount = -newCurrentPlayerGold), tradeLogic.currentTrade.theirOffers, tradeLogic.currentTrade.ourOffers)
+                        .copy(amount = -newCurrentPlayerGold), tradeLogic.currentTrade.theirOffers, tradeLogic.currentTrade.ourOffers)
                 }
                 // Check if they require more gold from us
                 if (newOtherCivGold < 0) {
                     offerColumnsTable.addOffer( tradeLogic.ourAvailableOffers.first { it.type == TradeOfferType.Gold }
-                            .copy(amount = -newOtherCivGold), tradeLogic.currentTrade.ourOffers, tradeLogic.currentTrade.theirOffers)
+                        .copy(amount = -newOtherCivGold), tradeLogic.currentTrade.ourOffers, tradeLogic.currentTrade.theirOffers)
                 }
             }
 
-            if (civ.gameInfo.gameParameters.isSimultaneousGame) {
-                com.unciv.UncivGame.Current.worldScreen?.actionBroadcastManager
-                    ?.sendGameAction(
-                        GameAction.SendTradeRequestAction(otherCivilization.civName, civ.civName, tradeLogic.currentTrade.reverse().toTradeData())
-                    )
-            } else {
+            if (!SimultaneousModeInterceptor.interceptSendTradeRequest(civ.civName, otherCivilization.civName, tradeLogic.currentTrade.reverse().toTradeData()))
                 otherCivilization.tradeRequests.add(TradeRequest(civ.civID, tradeLogic.currentTrade.reverse()))
-            }
+
             civ.cache.updateCivResources()
             offerButton.setText("Retract offer".tr())
         }

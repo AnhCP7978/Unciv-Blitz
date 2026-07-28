@@ -14,6 +14,7 @@ import com.unciv.ui.components.input.KeyboardBinding
 import com.unciv.ui.components.widgets.ColorMarkupLabel
 import com.unciv.ui.objectdescriptions.BaseUnitDescriptions
 import com.unciv.ui.screens.worldscreen.unit.actions.UnitActionsUpgrade
+import com.unciv.logic.multiplayer.SimultaneousModeInterceptor
 
 /**
  *  A popup menu showing info about an Unit upgrade, with buttons to upgrade "this" unit or _all_
@@ -106,7 +107,8 @@ class UnitUpgradeMenu(
 
     private fun doUpgrade() {
         SoundPlayer.play(unitAction.uncivSound)
-        unitAction.action!!()
+        if (!SimultaneousModeInterceptor.interceptUpgradeUnitAction(unit.id, unitToUpgradeTo.name))
+            unitAction.action!!()
     }
 
     private fun doAllUpgrade() {
@@ -115,7 +117,9 @@ class UnitUpgradeMenu(
             val otherAction = UnitActionsUpgrade.getUpgradeActions(unit)
                 .firstOrNull{ (it as UpgradeUnitAction).unitToUpgradeTo == unitToUpgradeTo &&
                     it.action != null }
-            otherAction?.action?.invoke()
+            // The if case is single-player / non-intercepted. In MP the interceptor handles it.
+            if (otherAction != null && !SimultaneousModeInterceptor.interceptUpgradeUnitAction(unit.id, unitToUpgradeTo.name))
+                otherAction.action!!.invoke()
         }
     }
 }
