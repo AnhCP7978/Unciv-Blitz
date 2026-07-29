@@ -1,3 +1,66 @@
+## 4.21.4
+
+CPU performance improvements for map lag and map generation latency
+
+perf: improve fps in technology picker screen - By shwwwa
+
+By Angais:
+- Fix city-state wary probability calculation 
+- Fix join-war penalty calculation
+
+By WhoIsJohannes:
+- Fix two AI evaluation bugs: inverted WLTKD luxury priority, defensive-pact ally force using wrong civ 
+- Fix two AI spaceship-race bugs: dead space-resource reserve, war push overwriting parts
+
+By Fanfblrik:
+- City-states found first city in place by default (opt-out unique) 
+- Start bias unique (Maritime Coast via CityStateType uniques) 
+
+By SomeTroglodyte:
+- Ruleset validator: Warn about potential infinite loops Free building -> Remove building
+- Allow specific commit links in "Download mod from URL"
+
+## 4.21.3
+
+Fixed mosque of djenne not working until industrial age
+
+By Fanfblrik: 
+- Don't wipe city-state relations on liberation 
+- Freeze Demographics rankings to turn-start snapshots 
+
+fix: MP upload no longer causes improvements to advance - By cy-elec
+
+By WhoIsJohannes:
+- AI improvements: parallel settlers, expansion un-latch, research agreements, annex guard 
+- CPU performance improvements 
+
+By SomeTroglodyte:
+- Fix "on losing unit" triggers running when a new unit can't be placed
+- Allow limited conditionals on UniqueType.HiddenFromCivilopedia
+- Catch load from custom location exceptions
+- Fix the tile info "needs tech" line
+
+## 4.21.2
+
+Disable constructions per city/game instead of client wide - By unciv-loof
+
+Replace -NC sounds with libre ones - By Wuzzy2
+
+Add [Resource] to tile. (Credit to Robloach) - By chenxing61
+
+Implement impi unique extra ranged attack - By O-spin
+
+Mod checker locates recursive citywide-resource countable in <for every [resource]> - By mvanhorn
+
+By SomeTroglodyte:
+- Button to check a Mod directly from the Mod manager screen
+- Politics overview "Ball of Yarn" makeover
+- New city overview column: Majority Religion
+- Allow pixel unit art option and modded extraImages for units to coexist
+- Make no-barbarians games ignore OneTimeRebel and OneTimeAmountRebels triggereables
+- Fix RekMod Moai can be built on water tiles with a resource
+- Prettify the city-state diplomacy page when a CS has _many_ protectors
+
 ## 4.21.1
 
 Fixed stockpiled resource trade not actually transferring

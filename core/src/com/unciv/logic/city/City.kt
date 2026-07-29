@@ -32,6 +32,7 @@ import com.unciv.models.stats.INamed
 import com.unciv.models.stats.Stat
 import com.unciv.models.stats.SubStat
 import com.unciv.utils.pseudoRandomUuid
+import com.unciv.utils.withItem
 import com.unciv.utils.withoutItem
 import yairm210.purity.annotations.Cache
 import yairm210.purity.annotations.LocalState
@@ -82,6 +83,15 @@ class City : IsPartOfGameInfoSerialization, INamed {
     var expansion = CityExpansionManager()
     var religion = CityReligionManager()
     var espionage = CityEspionageManager()
+
+    /** Effect: moved to disabled section in cosntruction list, and not built during automation */
+    var disabledConstructions = HashSet<String>()
+        private set
+    fun resetDisabledConstructions() {
+        disabledConstructions.clear()
+        if (civ.isHuman())
+            disabledConstructions.addAll(civ.disabledCityConstructions)
+    }
 
     @Transient  // CityStats has no serializable fields
     var cityStats = CityStats(this)
@@ -170,6 +180,7 @@ class City : IsPartOfGameInfoSerialization, INamed {
         toReturn.cityConstructions = cityConstructions.clone()
         toReturn.expansion = expansion.clone()
         toReturn.religion = religion.clone()
+        toReturn.disabledConstructions.addAll(disabledConstructions)
         toReturn.tiles = tiles
         toReturn.workedTiles = workedTiles
         toReturn.lockedTiles = lockedTiles
@@ -204,7 +215,7 @@ class City : IsPartOfGameInfoSerialization, INamed {
     @Readonly fun isCapital(): Boolean = cityConstructions.builtBuildingUniqueMap.hasUnique(UniqueType.IndicatesCapital, state)
     @Readonly fun isCoastal(): Boolean = centerTile.isAdjacentToCoast()
     @Readonly fun isNaval(): Boolean = centerTile.isWater || isCoastal()
-    
+
     @Readonly fun getBombardRange(): Int = civ.gameInfo.ruleset.modOptions.constants.baseCityBombardRange
     @Readonly fun getWorkRange(): Int = civ.gameInfo.ruleset.modOptions.constants.cityWorkRange
     @Readonly fun getExpandRange(): Int = civ.gameInfo.ruleset.modOptions.constants.cityExpandRange
@@ -218,7 +229,7 @@ class City : IsPartOfGameInfoSerialization, INamed {
         val mediumTypes = civ.cache.citiesConnectedToCapitalToMediums[this] ?: return false
         return connectionTypePredicate(mediumTypes)
     }
-    
+
     @Readonly
     fun getLandAttackPath(destination: City, maxTurns: Int = PathingMap.MAX_VALID_TURNS): List<Tile>? {
         @LocalState val pathingCache = landAttackPathing.getOrPut(destination.civ, {PathingMap.createLandAttackPathingMap(civ, centerTile, destination.civ)})
@@ -366,6 +377,29 @@ class City : IsPartOfGameInfoSerialization, INamed {
     //endregion
 
     //region state-changing functions
+    fun lockTile(tile: Tile): Boolean {
+        require(isWorked(tile)) { "Cannot lock tile ${tile.position} — not worked by $name" }
+        return lockedTiles.add(tile.position)
+    }
+    fun unlockTile(tile: Tile): Boolean = lockedTiles.remove(tile.position)
+
+    fun workTile(tile: Tile): Boolean {
+        require(getWorkableTiles().contains(tile)) { "Tile ${tile.position} is not workable by $name" }
+        if (isWorked(tile)) return false
+        workedTiles = workedTiles.withItem(tile.position)
+        return true
+    }
+    fun stopWorkingTile(tile: Tile): Boolean {
+        if (!isWorked(tile)) return false
+        unlockTile(tile)
+        workedTiles = workedTiles.withoutItem(tile.position)
+        return true
+    }
+    fun clearWorkedTiles() {
+        workedTiles = hashSetOf()
+        lockedTiles.clear()
+    }
+
     fun setTransients(civInfo: Civilization) {
         this.civ = civInfo
         this.id = if (id != NO_ID) id else pseudoRandomId(civ)
