@@ -362,6 +362,7 @@ class NewGameScreen(
         }
 
         if (gameSetupInfo.gameParameters.isOnlineMultiplayer) {
+            newGame.gameParameters.hostPlayerId = UncivGame.Current.settings.multiplayer.getUserId()
             newGame.isUpToDate = true // So we don't try to download it from dropbox the second after we upload it - the file is not yet ready for loading!
             try {
                 game.onlineMultiplayer.createGame(newGame)

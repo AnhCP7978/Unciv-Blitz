@@ -79,7 +79,7 @@ object UnitActionsPillage {
         )
     }
 
-    private fun pillageLooting(tile: Tile, unit: MapUnit) {
+    internal fun pillageLooting(tile: Tile, unit: MapUnit) {
         val closestCity = unit.civ.cities.minByOrNull { it.getCenterTile().aerialDistanceTo(tile) }
         val improvement = tile.getImprovementToPillage()!!
 

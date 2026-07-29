@@ -30,6 +30,7 @@ import com.unciv.ui.components.input.keyShortcuts
 import com.unciv.ui.components.input.onActivation
 import com.unciv.ui.components.input.onClick
 import com.unciv.ui.components.tilegroups.citybutton.InfluenceTable
+import com.unciv.logic.multiplayer.SimultaneousModeInterceptor
 import com.unciv.ui.images.ImageGetter
 import com.unciv.ui.popups.ConfirmPopup
 import com.unciv.ui.screens.basescreen.BaseScreen
@@ -317,7 +318,9 @@ class DiplomacyScreen(
         }
         declareWarButton.onClick {
             ConfirmPopup(this, getDeclareWarButtonText(otherCiv), "Declare war") {
-                diplomacyManager.declareWar()
+                if (!SimultaneousModeInterceptor.interceptDeclareWar(viewingCiv.civName, otherCiv.civName))
+                    diplomacyManager.declareWar() // Apply locally if intercepting failed/is non-simultaneous mode
+
                 setRightSideFlavorText(otherCiv, otherCiv.nation.attacked, "Very well.")
                 updateLeftSideTable(otherCiv)
                 val music = UncivGame.Current.musicController

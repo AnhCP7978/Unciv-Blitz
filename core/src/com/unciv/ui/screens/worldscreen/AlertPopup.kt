@@ -5,6 +5,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane
 import com.badlogic.gdx.scenes.scene2d.ui.Table
 import com.unciv.Constants
 import com.unciv.UncivGame
+import com.unciv.logic.multiplayer.GameAction
 import com.unciv.logic.battle.BattleUnitCapture
 import com.unciv.logic.city.City
 import com.unciv.logic.civilization.AlertType
@@ -37,6 +38,7 @@ import com.unciv.ui.screens.victoryscreen.VictoryScreen
 import yairm210.purity.annotations.Readonly
 import java.util.EnumSet
 import kotlin.text.ifEmpty
+import com.unciv.logic.multiplayer.SimultaneousModeInterceptor
 
 /**
  * [Popup] communicating events other than trade offers to the player.
@@ -181,7 +183,9 @@ class AlertPopup(
             addCloseButton("THIS MEANS WAR!", KeyboardBinding.Confirm) {
             player.getDiplomacyManager(bullyOrAttacker)!!.sideWithCityState()
             val warReason = if (popupAlert.type == AlertType.AttackedAllyMinor) WarType.AlliedCityStateWar else WarType.ProtectedCityStateWar
-            player.getDiplomacyManager(bullyOrAttacker)!!.declareWar(DeclareWarReason(warReason, cityState))
+            if (!SimultaneousModeInterceptor.interceptDeclareWar(player.civName, bullyOrAttacker.civName))
+                player.getDiplomacyManager(bullyOrAttacker)!!.declareWar(DeclareWarReason(warReason, cityState))
+
             cityState.getDiplomacyManager(player)!!.influence += 20f // You went to war for us!!
         }.row()}
 
@@ -210,20 +214,25 @@ class AlertPopup(
             addSeparator()
         }
 
+        fun broadcastCapture(mode: String): Boolean {
+            return SimultaneousModeInterceptor.interceptCaptureCity(city.id, conqueringCiv.civName, mode)
+        }
         if (conqueringCiv.isOneCityChallenger()) {
             addDestroyOption {
-                city.puppetCity(conqueringCiv)
-                city.destroyCity()
+                if (!broadcastCapture("Destroy")) {
+                    city.puppetCity(conqueringCiv)
+                    city.destroyCity()
+                }
             }
         } else {
             val mayAnnex = !conqueringCiv.hasUnique(UniqueType.MayNotAnnexCities)
             addAnnexOption(city, mayAnnex = mayAnnex) {
-                city.puppetCity(conqueringCiv)
+                if (!broadcastCapture("Annex")) city.puppetCity(conqueringCiv)
             }
             addSeparator()
 
             addPuppetOption(mayAnnex = mayAnnex) {
-                city.puppetCity(conqueringCiv)
+                if (!broadcastCapture("Puppet")) city.puppetCity(conqueringCiv)
             }
             addSeparator()
 
@@ -290,7 +299,8 @@ class AlertPopup(
         val diplomacy = viewingCiv.getDiplomacyManager(denouncer)!!
         if (diplomacy.canDeclareWar()) {
             addCloseButton("THIS MEANS WAR! (Declare war)") {
-                diplomacy.declareWar()
+                if (!SimultaneousModeInterceptor.interceptDeclareWar(viewingCiv.civName, denouncer.civName))
+                    diplomacy.declareWar()
             }.row()
         }
         addCloseButton("Very well.", KeyboardBinding.Cancel).row()
@@ -318,7 +328,7 @@ class AlertPopup(
         }.row()
         addCloseButton(demand.refuseDemandText, KeyboardBinding.Cancel) {
             playerDiploManager.refuseDemand(demand)
-            if (demand == Demand.DoNotAttackUs)
+            if (demand == Demand.DoNotAttackUs && !SimultaneousModeInterceptor.interceptDeclareWar(viewingCiv.civName, otherciv.civName))
                 viewingCiv.getDiplomacyManager(otherciv)!!.declareWar()
         }
         return true
@@ -433,6 +443,7 @@ class AlertPopup(
         bottomTable.defaults().pad(0f, 30f) // Small buttons, plenty of pad so we don't fat-finger it
 
         addCloseButton(Constants.yes, KeyboardBinding.Confirm) {
+            if (SimultaneousModeInterceptor.interceptReturnCapturedUnit(capturedUnit.id, true)) return@addCloseButton
             // Return it to original owner
             val unitName = capturedUnit.baseUnit.name
             capturedUnit.destroy()
@@ -460,6 +471,7 @@ class AlertPopup(
             originalOwner.addNotification("Your captured [${unitName}] has been returned by [${captor.civName}]", notificationSequence, NotificationCategory.Diplomacy, NotificationIcon.Trade, unitName, captor.civName)
         }
         addCloseButton(Constants.no, KeyboardBinding.Cancel) {
+            if (SimultaneousModeInterceptor.interceptReturnCapturedUnit(capturedUnit.id, false)) return@addCloseButton
             // Take it for ourselves
             BattleUnitCapture.captureOrConvertToWorker(capturedUnit, captor)
         }
@@ -614,8 +626,10 @@ class AlertPopup(
     private fun addLiberateOption(city: City, conqueringCiv: Civilization) {
         val button = "Liberate (city returns to [originalOwner])".fillPlaceholders(city.foundingCivObject!!.civName).toTextButton()
         button.onActivation {
-            city.liberateCity(conqueringCiv)
-            close()
+            if (!SimultaneousModeInterceptor.interceptCaptureCity(city.id, conqueringCiv.civName, "Liberate")) {
+                city.liberateCity(conqueringCiv)
+                close()
+            }
         }
         button.keyShortcuts.add('l')
         add(button).row()
@@ -629,10 +643,12 @@ class AlertPopup(
             if (!canRaze) disable()
             else {
                 onActivation {
-                    city.puppetCity(conqueringCiv)
-                    if (mayAnnex) { city.annexCity() }
-                    city.isBeingRazed = true
-                    close()
+                    if (!SimultaneousModeInterceptor.interceptCaptureCity(city.id, conqueringCiv.civName, "Raze")) {
+                        city.puppetCity(conqueringCiv)
+                        if (mayAnnex) { city.annexCity() }
+                        city.isBeingRazed = true
+                        close()
+                    }
                 }
                 keyShortcuts.add('r')
             }
@@ -663,8 +679,7 @@ class AlertPopup(
                 unit = viewingCiv.units.getUnitById(unitId)
             }
         }
-        
-        
+
         val event = gameInfo.ruleset.events[eventName] ?: return false
         val render = RenderEvent(event, worldScreen, unit) { close() }
         if (!render.isValid) return false

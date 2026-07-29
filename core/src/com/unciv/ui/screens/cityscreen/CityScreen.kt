@@ -44,6 +44,7 @@ import com.unciv.ui.screens.basescreen.RecreateOnResize
 import com.unciv.ui.screens.worldscreen.WorldScreen
 import com.unciv.view.CityView
 import kotlin.math.max
+import com.unciv.logic.multiplayer.SimultaneousModeInterceptor
 
 class CityScreen(
     internal val city: City,
@@ -109,7 +110,6 @@ class CityScreen(
             exit()
         }
     }
-
 
     /** Holds City tiles group*/
     private var tileGroups = ArrayList<CityTileGroup>()
@@ -311,7 +311,7 @@ class CityScreen(
             val annexCityButton = "Annex city".toTextButton()
             annexCityButton.labelCell.pad(10f)
             annexCityButton.onClick {
-                cityView.tryAnnexCity()
+                if (!SimultaneousModeInterceptor.interceptAnnexCity(city.id, city.civ.civName)) cityView.tryAnnexCity()
                 update()
             }
             if (!canChangeState) annexCityButton.disable()
@@ -447,9 +447,12 @@ class CityScreen(
             restoreDefault = { update() }
         ) {
             SoundPlayer.play(UncivSound.Coin)
-            cityView.tryBuyTile(cityView.tileView(selectedTile))
-            // preselect the next tile on city screen rebuild so bulk buying can go faster
-            UncivGame.Current.replaceCurrentScreen(CityScreen(city, initSelectedTile = cityView.chooseNewTileToOwn()))
+            // Simultaneous multiplayer: route through host-authoritative broadcast
+            if (!SimultaneousModeInterceptor.interceptBuyTile(city.id, selectedTile.position.x, selectedTile.position.y)) {
+                cityView.tryBuyTile(cityView.tileView(selectedTile))
+                // preselect the next tile on city screen rebuild so bulk buying can go faster
+                UncivGame.Current.replaceCurrentScreen(CityScreen(city, initSelectedTile = cityView.chooseNewTileToOwn()))
+            }
         }.open()
     }
 

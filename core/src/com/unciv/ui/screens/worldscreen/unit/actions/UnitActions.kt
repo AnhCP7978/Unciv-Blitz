@@ -2,6 +2,7 @@ package com.unciv.ui.screens.worldscreen.unit.actions
 
 import com.unciv.GUI
 import com.unciv.UncivGame
+import com.unciv.logic.multiplayer.SimultaneousModeInterceptor
 import com.unciv.logic.automation.unit.UnitAutomation
 import com.unciv.logic.civilization.diplomacy.DiplomaticModifiers
 import com.unciv.logic.map.mapunit.MapUnit
@@ -29,7 +30,6 @@ import yairm210.purity.annotations.Readonly
  *      Avoid testing actions that need WorldScreen context, and migrate any un-mapped ones you need to `actionTypeToFunctions`.
  */
 object UnitActions {
-
     /**
      *  Get an instance of [UnitAction] of the [unitActionType] type for [unit] and execute its [action][UnitAction.action], if enabled.
      *
@@ -238,8 +238,11 @@ object UnitActions {
                         "Disband this unit for [${unit.baseUnit.getDisbandGold(unit.civ)}] gold?".tr()
                     else "Do you really want to disband this unit?".tr()
                     ConfirmPopup(worldScreen, disbandText, "Disband unit") {
+                        // if (SimultaneousModeInterceptor.interceptUnitAction(unit.id, UnitAction(UnitActionType.DisbandUnit, 0f, ""))) return@ConfirmPopup
+                        // else {
                         unit.disband()
                         unit.civ.updateStatsForNextTurn() // less upkeep!
+                        // }
                         GUI.setUpdateWorldOnNextRender()
                         if (GUI.getSettings().autoUnitCycle)
                             worldScreen.switchToNextUnit()
@@ -408,5 +411,4 @@ object UnitActions {
         return UnitAction(UnitActionType.ShowAdditionalActions, 0f) { actionsTable.changePage(1, unit) } to
             UnitAction(UnitActionType.HideAdditionalActions, 0f) { actionsTable.changePage(-1, unit) }
     }
-
 }

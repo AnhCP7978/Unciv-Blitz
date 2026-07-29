@@ -1,11 +1,14 @@
 package com.unciv.ui.screens.pickerscreens
 
+import com.unciv.UncivGame
+import com.unciv.logic.multiplayer.GameAction
 import com.unciv.logic.civilization.Civilization
 import com.unciv.models.ruleset.Belief
 import com.unciv.models.ruleset.BeliefType
 import com.unciv.models.ruleset.unique.GameContext
 import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.models.translations.tr
+import com.unciv.logic.multiplayer.SimultaneousModeInterceptor
 
 class PantheonPickerScreen(
     choosingCiv: Civilization
@@ -31,12 +34,13 @@ class PantheonPickerScreen(
         }
 
         setOKAction("Choose a pantheon") {
-            chooseBeliefs(listOf(selectedPantheon!!), useFreeBeliefs = usingFreeBeliefs())
+            if (!SimultaneousModeInterceptor.interceptFoundPantheon(selectedPantheon!!.name, choosingCiv.civName))
+                chooseBeliefs(listOf(selectedPantheon!!), useFreeBeliefs = usingFreeBeliefs())
         }
     }
     fun beliefIsAllowed(belief: Belief, choosingCiv: Civilization): Boolean {
         if (belief.getMatchingUniques(UniqueType.OnlyAvailable, GameContext.IgnoreConditionals)
-                .any { !it.conditionalsApply(choosingCiv.state) })
+            .any { !it.conditionalsApply(choosingCiv.state) })
             return false
         if (belief.getMatchingUniques(UniqueType.Unavailable, choosingCiv.state).any())
             return false

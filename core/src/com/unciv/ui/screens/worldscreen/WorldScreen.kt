@@ -15,6 +15,7 @@ import com.unciv.logic.civilization.diplomacy.DiplomaticStatus
 import com.unciv.logic.event.EventBus
 import com.unciv.logic.map.HexCoord
 import com.unciv.logic.map.MapVisualization
+import com.unciv.logic.multiplayer.ActionBroadcastManager
 import com.unciv.logic.multiplayer.MultiplayerGameUpdated
 import com.unciv.logic.multiplayer.storage.FileStorageRateLimitReached
 import com.unciv.logic.multiplayer.storage.MultiplayerAuthException
@@ -110,6 +111,11 @@ class WorldScreen(
 
     val mapHolder = WorldMapHolder(this, gameInfo.tileMap)
 
+    /** Manages simultaneous multiplayer action broadcast. Null when not simultaneous. */
+    val actionBroadcastManager: ActionBroadcastManager? =
+        if (gameInfo.gameParameters.isSimultaneousGame) ActionBroadcastManager(this)
+        else null
+
     internal var waitingForAutosave = false
     private val mapVisualization = MapVisualization(gameInfo, viewingCiv)
 
@@ -194,7 +200,8 @@ class WorldScreen(
         addKeyboardPresses()  // shortcut keys like F1
 
 
-        if (gameInfo.gameParameters.isOnlineMultiplayer && !gameInfo.isUpToDate)
+        if (gameInfo.gameParameters.isOnlineMultiplayer && !gameInfo.isUpToDate
+            && !gameInfo.gameParameters.isSimultaneousGame)
             isPlayersTurn = false // until we're up to date, don't let the player do anything
 
         if (gameInfo.gameParameters.isOnlineMultiplayer) {
@@ -478,7 +485,9 @@ class WorldScreen(
 
     private fun displayTutorialsOnUpdate() {
 
-        displayTutorial(TutorialTrigger.Introduction)
+        if (!gameInfo.gameParameters.isSimultaneousGame) {
+            displayTutorial(TutorialTrigger.Introduction)
+        }
 
         displayTutorial(TutorialTrigger.EnemyCityNeedsConqueringWithMeleeUnit) {
             viewingCiv.diplomacy.values.asSequence()
@@ -577,6 +586,10 @@ class WorldScreen(
     }
 
     fun nextTurn() {
+        // In simultaneous mode, only the host processes turns.
+        // Non-hosts use ActionBroadcastManager.sendEndTurn instead.
+        if (gameInfo.gameParameters.isSimultaneousGame) return
+
         isPlayersTurn = false
         shouldUpdate = true
         val progressBar = NextTurnProgress(nextTurnButton)
@@ -768,7 +781,9 @@ class WorldScreen(
 
     private fun showTutorialsOnNextTurn() {
         if (!game.settings.showTutorials || autoPlay.isAutoPlaying()) return
-        displayTutorial(TutorialTrigger.SlowStart)
+        if (!gameInfo.gameParameters.isSimultaneousGame) {
+            displayTutorial(TutorialTrigger.SlowStart)
+        }
         displayTutorial(TutorialTrigger.CityExpansion) { viewingCiv.cities.any { it.expansion.tilesClaimed() > 0 } }
         displayTutorial(TutorialTrigger.BarbarianEncountered) { viewingCiv.viewableTiles.any { it.getUnits().any { unit -> unit.civ.isBarbarian } } }
         displayTutorial(TutorialTrigger.RoadsAndRailroads) { viewingCiv.cities.size > 2 }

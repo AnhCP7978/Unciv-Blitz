@@ -11,6 +11,7 @@ import com.unciv.Constants
 import com.unciv.logic.map.mapunit.MapUnit
 import com.unciv.logic.map.tile.ImprovementBuildingProblem
 import com.unciv.logic.map.tile.Tile
+import com.unciv.logic.multiplayer.SimultaneousModeInterceptor
 import com.unciv.models.ruleset.tile.TileImprovement
 import com.unciv.models.ruleset.unique.GameContext
 import com.unciv.models.ruleset.unique.UniqueType
@@ -58,11 +59,23 @@ class ImprovementPickerScreen(
 
     fun accept(improvement: TileImprovement?, secondImprovement: TileImprovement? = null) {
         if (improvement == null || tileMarkedForCreatesOneImprovement) return
+
+        // TEST: Cancel is a valid queue-mutation — broadcast it in MP
         if (improvement.name == Constants.cancelImprovementOrder) {
+            // if (SimultaneousModeInterceptor.interceptQueueImprovement(
+            //         unit.id, tile.position.x, tile.position.y,
+            //         Constants.cancelImprovementOrder
+            //     )) return
             tile.stopWorkingOnImprovement()
-            // no onAccept() - Worker can stay selected
         } else {
+            // Always apply locally so UI shows countdown immediately
+            // TEST: Broadcast improvement-queue to MP peers before applying locally
             if (improvement.name != tile.improvementInProgress) {
+                // if (SimultaneousModeInterceptor.interceptQueueImprovement(
+                //         unit.id, tile.position.x, tile.position.y,
+                //         improvement.name, secondImprovement?.name
+                //     )) return
+
                 tile.startWorkingOnImprovement(improvement, currentPlayerCiv, unit)
                 if (secondImprovement != null)
                     tile.queueImprovement(secondImprovement, currentPlayerCiv, unit)

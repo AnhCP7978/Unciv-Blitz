@@ -346,8 +346,6 @@ class Civilization : IsPartOfGameInfoSerialization {
         return toReturn
     }
 
-
-
     //region pure functions
     @Readonly
     fun getDifficulty(): Difficulty {
@@ -384,7 +382,6 @@ class Civilization : IsPartOfGameInfoSerialization {
     fun getKnownCivs() = diplomacy.values.asSequence().map { it.otherCiv }
         .filter { !it.isDefeated() && !it.isSpectator() }
 
-
     @Readonly
     /** forEachKnownCiv is faster, for cases that require high perf */
     fun getKnownCivsWithSpectators() = diplomacy.values.asSequence().map { it.otherCiv }
@@ -415,13 +412,12 @@ class Civilization : IsPartOfGameInfoSerialization {
     }
 
     @Readonly fun isOneCityChallenger() = playerType == PlayerType.Human && gameInfo.gameParameters.oneCityChallenge
-    @Readonly fun isCurrentPlayer() = gameInfo.currentPlayerCiv == this
+    @Readonly fun isCurrentPlayer() = gameInfo.currentPlayerCiv == this || gameInfo.gameParameters.isSimultaneousGame // Need monitoring. While things work, I feel uncanny...
     @Readonly fun isMajorCiv() = nation.isMajorCiv
     @Readonly fun isMinorCiv() = nation.isCityState || nation.isBarbarian
-    
+
     val isCityState get() = nation.isCityState
     val isBarbarian get() = nation.isBarbarian
-    
 
     @Readonly fun isSpectator() = nation.isSpectator
     @Readonly fun isAlive(): Boolean = !isDefeated()

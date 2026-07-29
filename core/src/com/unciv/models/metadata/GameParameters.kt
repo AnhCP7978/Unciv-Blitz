@@ -4,6 +4,11 @@ import com.unciv.logic.IsPartOfGameInfoSerialization
 import com.unciv.logic.civilization.PlayerType
 import com.unciv.models.ruleset.Speed
 
+enum class GameMode {
+    Sequential,
+    Simultaneous
+}
+
 class GameParameters : IsPartOfGameInfoSerialization { // Default values are the default new game
     var difficulty = "Prince"
     var speed: String = Speed.DEFAULT // Not an instance of class Speed
@@ -53,6 +58,9 @@ class GameParameters : IsPartOfGameInfoSerialization { // Default values are the
 
     // Multiplayer parameters
     var isOnlineMultiplayer = false
+    var gameMode = GameMode.Simultaneous
+    val isSimultaneousGame get() = isOnlineMultiplayer && gameMode == GameMode.Simultaneous
+    var hostPlayerId = ""
     var multiplayerServerUrl: String? = null
     var anyoneCanSpectate = true
     /** After this amount of minutes, anyone can choose to 'skip turn' of the current player to keep the game going */
@@ -100,12 +108,15 @@ class GameParameters : IsPartOfGameInfoSerialization { // Default values are the
         parameters.showCharts = showCharts
         parameters.hideOtherCivilizationStats = hideOtherCivilizationStats
         parameters.isOnlineMultiplayer = isOnlineMultiplayer
+        parameters.hostPlayerId = hostPlayerId
         parameters.multiplayerServerUrl = multiplayerServerUrl
         parameters.anyoneCanSpectate = anyoneCanSpectate
         parameters.baseRuleset = baseRuleset
         parameters.mods = LinkedHashSet(mods)
         parameters.maxTurns = maxTurns
         parameters.acceptedModCheckErrors = acceptedModCheckErrors
+
+        parameters.gameMode = gameMode
         return parameters
     }
 
@@ -118,6 +129,7 @@ class GameParameters : IsPartOfGameInfoSerialization { // Default values are the
             if (randomNumberOfCityStates) yield("Random number of City-States: $minNumberOfCityStates..$maxNumberOfCityStates")
             else yield("$numberOfCityStates CS")
             if (isOnlineMultiplayer) yield("Online Multiplayer")
+            if (isOnlineMultiplayer) yield(gameMode.toString())
             if (noBarbarians) yield("No barbs")
             if (ragingBarbarians) yield("Raging barbs")
             if (oneCityChallenge) yield("OCC")

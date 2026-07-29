@@ -45,7 +45,7 @@ import com.unciv.utils.Log
 import com.unciv.utils.launchOnGLThread
 import yairm210.purity.annotations.Readonly
 import java.lang.Float.max
-
+import com.unciv.logic.multiplayer.SimultaneousModeInterceptor
 
 class WorldMapHolder(
     internal val worldScreen: WorldScreen,
@@ -257,6 +257,7 @@ class WorldMapHolder(
             if (unit.canAttack() && attackableTile != null) {
                 /** ****** Right-click Attack ****** */
                 val attacker = MapUnitCombatant(unit)
+                if (SimultaneousModeInterceptor.interceptAttack(attacker, attackableTile.tileToAttack)) return
                 if (!Battle.movePreparingAttack(attacker, attackableTile)) return
                 if (!SoundPlayer.play(UncivSound(attacker.getName())))
                     SoundPlayer.play(attacker.getAttackSound())
@@ -279,6 +280,9 @@ class WorldMapHolder(
     }
 
     internal fun moveUnitToTargetTile(selectedUnits: List<MapUnit>, targetTile: Tile) {
+        // Simultaneous multiplayer: route through broadcast manager instead of local execution
+        if (SimultaneousModeInterceptor.interceptMove(selectedUnits.first(), targetTile)) return
+
         // this can take a long time, because of the unit-to-tile calculation needed, so we put it in a different thread
         // THIS PART IS REALLY ANNOYING
         // So lets say you have 2 units you want to move in the same direction, right

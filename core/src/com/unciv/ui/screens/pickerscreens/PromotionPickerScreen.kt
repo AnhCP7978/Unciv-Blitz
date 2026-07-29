@@ -13,6 +13,7 @@ import com.unciv.models.TutorialTrigger
 import com.unciv.models.UncivSound
 import com.unciv.models.ruleset.unit.Promotion
 import com.unciv.models.translations.tr
+import com.unciv.logic.multiplayer.SimultaneousModeInterceptor
 import com.unciv.ui.audio.SoundPlayer
 import com.unciv.ui.components.extensions.isEnabled
 import com.unciv.ui.components.extensions.toCheckBox
@@ -118,8 +119,17 @@ class PromotionPickerScreen private constructor(
         val path = tree.getPathTo(button.node.promotion)
         SoundPlayer.playRepeated(UncivSound.Promote, path.size.coerceAtMost(2))
 
-        for (promotion in path)
-            unit.promotions.addPromotion(promotion.name)
+        val existingPromotions = unit.promotions.promotions
+        val promotionNames = path.map { it.name } .filter { it !in existingPromotions } // Only get promotions that didn't exist yet
+
+        if (SimultaneousModeInterceptor.interceptPromoteAction(unit.id, promotionNames)) {
+            onChange?.invoke()
+            game.popScreen()
+            return
+        }
+
+        for (promotionName in promotionNames) // Non-simultaneous: apply locally
+            unit.promotions.addPromotion(promotionName)
 
         onChange?.invoke()
 

@@ -5,7 +5,9 @@ import com.badlogic.gdx.scenes.scene2d.ui.Button
 import com.badlogic.gdx.scenes.scene2d.ui.Table
 import com.badlogic.gdx.utils.Align
 import com.unciv.Constants
+import com.unciv.UncivGame
 import com.unciv.logic.civilization.Civilization
+import com.unciv.logic.multiplayer.GameAction
 import com.unciv.logic.civilization.managers.ReligionState
 import com.unciv.models.Counter
 import com.unciv.models.Religion
@@ -24,6 +26,7 @@ import com.unciv.ui.components.extensions.packIfNeeded
 import com.unciv.ui.components.extensions.surroundWithCircle
 import com.unciv.ui.images.ImageGetter
 import com.unciv.ui.popups.AskTextPopup
+import com.unciv.logic.multiplayer.SimultaneousModeInterceptor
 
 class ReligiousBeliefsPickerScreen (
     choosingCiv: Civilization,
@@ -77,8 +80,18 @@ class ReligiousBeliefsPickerScreen (
             if (pickIconAndName) "Choose a Religion"
             else "Enhance [${currentReligion.getReligionDisplayName()}]"
         ) {
-            if (civInfo.religionManager.religionState == ReligionState.FoundingReligion)
+            val beliefNames = beliefsToChoose.map { it.belief!!.name }
+            if (civInfo.religionManager.religionState == ReligionState.FoundingReligion) {
+                if (SimultaneousModeInterceptor.interceptCompleteFoundReligion(civInfo.civName, displayName!!, religionName!!, beliefNames)) {
+                    UncivGame.Current.popScreen()
+                    return@setOKAction
+                }
                 civInfo.religionManager.foundReligion(displayName!!, religionName!!)
+            }
+            else if (SimultaneousModeInterceptor.interceptCompleteFoundReligion(civInfo.civName, displayName!!, religionName!!, beliefNames)) {
+                UncivGame.Current.popScreen()
+                return@setOKAction
+            }
             chooseBeliefs(beliefsToChoose.map { it.belief!! }, usingFreeBeliefs())
         }
     }

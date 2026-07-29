@@ -39,7 +39,10 @@ enum class NextTurnAction(protected val text: String, val color: Color) {
     },
     Waiting("Waiting for other players...",Color.GRAY) {
         override fun getText(worldScreen: WorldScreen) =
-            if (worldScreen.gameInfo.gameParameters.isOnlineMultiplayer)
+            if (worldScreen.gameInfo.gameParameters.isSimultaneousGame
+                && worldScreen.actionBroadcastManager != null)
+                worldScreen.actionBroadcastManager.getWaitingStatus()
+            else if (worldScreen.gameInfo.gameParameters.isOnlineMultiplayer)
                 "Waiting for [${worldScreen.gameInfo.currentPlayerCiv}]..."
             else text
         override fun isChoice(worldScreen: WorldScreen) =
@@ -131,9 +134,29 @@ enum class NextTurnAction(protected val text: String, val color: Color) {
         override fun action(worldScreen: WorldScreen) =
             moveAutomatedUnits(worldScreen)
     },
+    SimultaneousEndTurn("End Turn", Color.WHITE) {
+        override fun isChoice(worldScreen: WorldScreen) =
+            worldScreen.gameInfo.gameParameters.isSimultaneousGame
+                && worldScreen.isPlayersTurn
+                && !(worldScreen.actionBroadcastManager?.hasEndedTurn ?: true)
+        override fun action(worldScreen: WorldScreen) {
+            val civName = worldScreen.viewingCiv.civName
+            worldScreen.actionBroadcastManager?.sendEndTurn(civName)
+            worldScreen.isPlayersTurn = false
+            worldScreen.shouldUpdate = true
+        }
+        override fun getText(worldScreen: WorldScreen) =
+            if (worldScreen.isPlayersTurn && !(worldScreen.actionBroadcastManager?.hasEndedTurn ?: true))
+                "End Turn"
+            else
+                "Waiting for other players..."
+        override fun getSubText(worldScreen: WorldScreen): String? =
+            getIdleUnitsText(worldScreen)
+    },
+
     NextTurn("Next turn", Color.WHITE) {
         override fun isChoice(worldScreen: WorldScreen) =
-            true  // When none of the others is active..
+            !worldScreen.gameInfo.gameParameters.isSimultaneousGame
         override fun action(worldScreen: WorldScreen) =
             worldScreen.confirmedNextTurn()
         override fun getSubText(worldScreen: WorldScreen): String? =

@@ -8,6 +8,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label
 import com.badlogic.gdx.scenes.scene2d.ui.Table
 import com.badlogic.gdx.scenes.scene2d.Touchable
 import com.badlogic.gdx.utils.Align
+import com.unciv.logic.multiplayer.GameAction
 import com.unciv.Constants
 import com.unciv.GUI
 import com.unciv.logic.civilization.Civilization
@@ -31,13 +32,12 @@ import com.unciv.ui.popups.ToastPopup
 import com.unciv.utils.Concurrency
 import yairm210.purity.annotations.Readonly
 import kotlin.math.abs
-
+import com.unciv.logic.multiplayer.SimultaneousModeInterceptor
 
 class TechPickerScreen(
     internal val civInfo: Civilization,
     centerOnTech: Technology? = null,
 ) : PickerScreen() {
-
     private val freeTechPick: Boolean = civInfo.tech.freeTechs != 0
     private val ruleset = civInfo.gameInfo.ruleset
     private var techNameToButton = HashMap<String, TechButton>()
@@ -116,13 +116,15 @@ class TechPickerScreen(
 
     override fun getCivilopediaRuleset() = ruleset
 
-
     private fun tryExit() {
         if (freeTechPick) {
             val freeTech = selectedTech!!.name
             // More evil people fast-clicking to cheat - #4977
             if (!researchableTechs.contains(freeTech)) return
-            civTech.getFreeTechnology(selectedTech!!.name)
+            if (SimultaneousModeInterceptor.interceptChooseFreeTech(freeTech, civInfo.civName))
+                civTech.freeTechs-- // Decrement locally so the picker doesn't re-open before the echo arrives
+            else
+                civTech.getFreeTechnology(selectedTech!!.name)
         }
         else civTech.techsToResearch = tempTechsToResearch
 
@@ -134,7 +136,6 @@ class TechPickerScreen(
     }
 
     private fun createTechTable() {
-
         for (label in eraLabels) label.remove()
         eraLabels.clear()
 
@@ -289,7 +290,6 @@ class TechPickerScreen(
                 }
 
                 if (techButtonCoords.y != prerequisiteCoords.y) {
-
                     val r = 6f
 
                     val deltaX = techButtonCoords.x - prerequisiteCoords.x
@@ -337,9 +337,7 @@ class TechPickerScreen(
                     lines.addActor(line2)
                     lines.addActor(line3)
                     lines.addActor(line4)
-
                 } else {
-
                     val line = ImageGetter.getWhiteDot().apply {
                         width = techButtonCoords.x - prerequisiteCoords.x
                         height = lineSize
@@ -380,17 +378,12 @@ class TechPickerScreen(
     }
 
     private fun selectTechnology(tech: Technology?, queue: Boolean = false, center: Boolean = false, switchFromWorldScreen: Boolean = true) {
-
         val previousSelectedTech = selectedTech
         selectedTech = tech
         descriptionLabel.setText(tech?.getDescription(civInfo))
 
-        if (!switchFromWorldScreen)
-            return
-
-        if (tech == null)
-            return
-
+        if (!switchFromWorldScreen) return
+        if (tech == null) return
         // center on technology
         if (center) centerOnTechnology(tech)
 
@@ -430,13 +423,12 @@ class TechPickerScreen(
             }
         }
 
-        if (queue){
+        if (queue) {
             for (pathTech in pathToTech) {
-                if (pathTech.name !in tempTechsToResearch) {
+                if (pathTech.name !in tempTechsToResearch)
                     tempTechsToResearch.add(pathTech.name)
-                }
             }
-        }else{
+        } else {
             tempTechsToResearch.clear()
             tempTechsToResearch.addAll(pathToTech.map { it.name })
         }

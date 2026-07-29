@@ -26,6 +26,7 @@ import com.unciv.ui.screens.civilopediascreen.MarkupRenderer
 import com.unciv.view.CityView
 import yairm210.purity.annotations.Readonly
 import kotlin.math.roundToInt
+import com.unciv.logic.multiplayer.SimultaneousModeInterceptor
 
 class CityScreenTileTable(private val cityScreen: CityScreen) : Table() {
     private val innerTable = Table()
@@ -154,11 +155,12 @@ class CityScreenTileTable(private val cityScreen: CityScreen) : Table() {
             .sumOf { cityView.getGoldCostOfTile(it.value, it.index) }
         private fun buyRing(ring: Int) {
             for (tileView in getRing(ring)) {
-                if (!cityView.tryBuyTile(tileView))
-                    break
+                if (!SimultaneousModeInterceptor.interceptBuyTile(city.id, tileView.tile.position.x, tileView.tile.position.y)) {
+                    if (!cityView.tryBuyTile(tileView)) break
+                }
             }
             SoundPlayer.play(Stat.Gold.purchaseSound)
-            cityScreen.game.replaceCurrentScreen(CityScreen(city)) // update doesn't redo the tiles
+            cityScreen.game.replaceCurrentScreen(com.unciv.ui.screens.cityscreen.CityScreen(city))
         }
     }
 }

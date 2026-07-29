@@ -180,7 +180,16 @@ class PolicyManager : IsPartOfGameInfoSerialization {
         return cost - (cost % 5)
     }
 
+    internal fun applyChoices(policies: Collection<String>, numberOfAdopted: Int, free: Int, culture: Int) {
+        adoptedPolicies.clear()
+        adoptedPolicies.addAll(policies)
+        numberOfAdoptedPolicies = numberOfAdopted
+        freePolicies = free
+        storedCulture = culture
+    }
+
     @Readonly fun getAdoptedPolicies(): HashSet<String> = adoptedPolicies
+    @Readonly fun getNumberOfAdoptedPolicies(): Int = numberOfAdoptedPolicies
 
     @Readonly
     /**

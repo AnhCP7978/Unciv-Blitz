@@ -22,7 +22,7 @@ class Timers {
             for (times in spanTimesInMicroseconds.values)
                 times.clear()
         }
-        startGcCount = UncivGame.Current?.getGcCount() ?: 0
+        startGcCount = UncivGame.Current.getGcCount() // Compiler: UncivGame.Current cannot be null
         timingEnabledTimestamp = markNow()
     }
 
@@ -34,7 +34,7 @@ class Timers {
         val totalTimingDuration = (automationEndTime - timingEnabledTimestamp).inWholeMicroseconds
         synchronized(spanTimesInMicroseconds) {
             if (spanTimesInMicroseconds.isEmpty()) return
-            val gcCount = (UncivGame.Current?.getGcCount() ?: 0) - startGcCount
+            val gcCount = (UncivGame.Current.getGcCount()) - startGcCount // Compiler: UncivGame.Current cannot be null
             val gcCountPerTurn = gcCount.toDouble() / (spanTimesInMicroseconds["GameInfo.nextTurn"]?.size ?: 1)
             Log.debug("Timing took $totalTimingDuration, with $gcCountPerTurn GCs per turn on average")
             Log.debug("Span Timing:\tname\tcount\tmean\t95CiMin\t95CiMax\tsum\tpercent\tstddev\tstderr\tvariance\tmin\tp50\tp90\tp95\tp99\tmax")

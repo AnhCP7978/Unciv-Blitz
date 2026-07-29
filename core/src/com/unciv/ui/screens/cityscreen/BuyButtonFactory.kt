@@ -5,6 +5,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextButton
 import com.unciv.Constants
 import com.unciv.logic.city.CityConstructions
 import com.unciv.logic.map.tile.Tile
+import com.unciv.logic.multiplayer.SimultaneousModeInterceptor
 import com.unciv.models.Religion
 import com.unciv.models.ruleset.Building
 import com.unciv.models.ruleset.IConstruction
@@ -165,6 +166,14 @@ class BuyButtonFactory(val cityScreen: CityScreen) {
         stat: Stat = Stat.Gold,
         tile: Tile? = null
     ) {
+        // Simultaneous multiplayer: route purchase through host-authoritative broadcast
+        val queuePosition = cityScreen.selectedQueueEntry
+        if (SimultaneousModeInterceptor.interceptPurchase(
+            construction.name,
+            cityScreen.city.id,
+            stat.name,
+        )) return
+
         SoundPlayer.play(stat.purchaseSound)
         val city = cityScreen.city
         if (!city.cityConstructions.purchaseConstruction(construction, cityScreen.selectedQueueEntry, false, stat, tile)) {
@@ -190,5 +199,4 @@ class BuyButtonFactory(val cityScreen: CityScreen) {
         cityScreen.city.reassignPopulation()
         cityScreen.update()
     }
-
 }

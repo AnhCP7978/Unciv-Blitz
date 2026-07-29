@@ -31,8 +31,9 @@ class MultiplayerServer(
     fun getFeatureSet() = featureSet
     fun setFeatureSet(value: ServerFeatureSet) {
         if (featureSet != value) {
-            UncivGame.Current.worldScreen?.chatButton?.refreshVisibility()
             featureSet = value
+            // refreshVisibility reads the updated featureSet to decide if chat should start/stop
+            UncivGame.Current.worldScreen?.chatButton?.refreshVisibility()
         }
     }
 
@@ -87,7 +88,6 @@ class MultiplayerServer(
         return false
     }
 
-
     /**
      * @return true if the authentication was successful or the server does not support authentication.
      * @throws FileStorageRateLimitReached if the file storage backend can't handle any additional actions for a time
@@ -120,7 +120,6 @@ class MultiplayerServer(
 
         return false
     }
-
 
     /**
      * @throws FileStorageRateLimitReached if the file storage backend can't handle any additional actions for a time
@@ -167,7 +166,6 @@ class MultiplayerServer(
         gameInfo.gameParameters.multiplayerServerUrl = UncivGame.Current.settings.multiplayer.getServer()
         return gameInfo
     }
-
 
     /**
      * @throws FileStorageRateLimitReached if the file storage backend can't handle any additional actions for a time

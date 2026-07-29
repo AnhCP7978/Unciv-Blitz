@@ -56,6 +56,10 @@ object ChatStore {
      */
     var chatPopup: ChatPopup? = null
 
+    /** Called when a multiplayer action relay response arrives from the server.
+     *  Set by [ActionBroadcastManager] on creation. */
+    var onActionResponse: ((Response) -> Unit)? = null
+
     var hasGlobalMessage = false
 
     private var gameIdToChat: MutableMap<UUID, Chat> = synchronizedMap(mutableMapOf())

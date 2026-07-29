@@ -46,6 +46,15 @@ internal object UncivServer {
 @Serializable
 data class IsAliveInfo(val authVersion: Int, val chatVersion: Int)
 
+/** Minimal relay container — server doesn't deserialize the action payload */
+@Serializable
+data class GameActionPacket(
+    val gameId: String,
+    val validated: Boolean = false,
+    /** Raw action payload — server doesn't deserialize it, just passes through */
+    val action: kotlinx.serialization.json.JsonElement? = null,
+)
+
 @Serializable
 sealed class Message {
     @Serializable
@@ -64,6 +73,31 @@ sealed class Message {
     @SerialName("leave")
     data class Leave(
         val gameIds: List<String>
+    ) : Message()
+
+    @Serializable
+    @SerialName("gameAction")
+    data class GameActionRelay(
+        val packet: GameActionPacket
+    ) : Message()
+
+    @Serializable
+    @SerialName("setHost")
+    data class SetHost(
+        val gameId: String,
+    ) : Message()
+
+    @Serializable
+    @SerialName("endTurn")
+    data class EndTurn(
+        val gameId: String, val civName: String,
+        val choicesJson: String? = null,
+    ) : Message()
+
+    @Serializable
+    @SerialName("turnAdvance")
+    data class TurnAdvance(
+        val gameId: String, val newTurns: Int
     ) : Message()
 }
 
@@ -87,12 +121,45 @@ sealed class Response {
     data class Error(
         val message: String
     ) : Response()
+
+    @Serializable
+    @SerialName("gameAction")
+    data class GameActionRelay(
+        val packet: GameActionPacket
+    ) : Response()
+
+    @Serializable
+    @SerialName("gameActionRejected")
+    data class GameActionRejected(val reason: String) : Response()
+
+    @Serializable
+    @SerialName("hostSet")
+    data class HostSet(
+        val gameId: String,
+        val hostUserId: String,
+    ) : Response()
+
+    @Serializable
+    @SerialName("playerEndedTurn")
+    data class PlayerEndedTurn(
+        val gameId: String, val civName: String,
+        val finishedPlayers: List<String> = emptyList(),
+        val choicesJson: String? = null,
+    ) : Response()
+
+    @Serializable
+    @SerialName("turnAdvanced")
+    data class TurnAdvanced(
+        val gameId: String, val newTurns: Int
+    ) : Response()
 }
 
 @OptIn(ExperimentalUuidApi::class)
 private class WebSocketSessionManager {
     private val gameId2WSSessions = synchronizedMap(mutableMapOf<Uuid, MutableSet<DefaultWebSocketServerSession>>())
     private val wsSession2GameIds = synchronizedMap(mutableMapOf<DefaultWebSocketServerSession, MutableSet<Uuid>>())
+    /** Track which session is the host per game */
+    val hostByGame = synchronizedMap(mutableMapOf<Uuid, DefaultWebSocketServerSession>())
 
     fun isSubscribed(session: DefaultWebSocketServerSession, gameId: Uuid): Boolean =
         gameId2WSSessions.getOrPut(gameId) { synchronizedSet(mutableSetOf()) }.contains(session)
@@ -113,6 +180,8 @@ private class WebSocketSessionManager {
         wsSession2GameIds[session]?.removeAll(uuids)
         for (uuid in uuids) {
             gameId2WSSessions[uuid]?.remove(session)
+            // If this was the host, clear it
+            if (hostByGame[uuid] == session) hostByGame.remove(uuid)
         }
     }
 
@@ -127,7 +196,29 @@ private class WebSocketSessionManager {
         }
     }
 
+    /** Publish only to the host session for this game */
+    suspend fun publishToHost(gameId: Uuid, message: Response) {
+        val host = hostByGame[gameId] ?: return
+        if (host.isActive) host.sendSerialized(message)
+    }
+
+    /** Publish to all subscribers except the host (for validated echoes) */
+    suspend fun publishToNonHosts(gameId: Uuid, message: Response) {
+        val host = hostByGame[gameId]
+        val sessions = gameId2WSSessions.getOrPut(gameId) { synchronizedSet(mutableSetOf()) }
+        for (session in sessions) {
+            if (session == host) continue // host already applied locally
+            if (!session.isActive) {
+                sessions.remove(session)
+                continue
+            }
+            session.sendSerialized(message)
+        }
+    }
+
     fun cleanupSession(session: DefaultWebSocketServerSession) {
+        // Clean up host mapping
+        hostByGame.entries.removeAll { it.value == session }
         for (gameId in wsSession2GameIds.remove(session) ?: emptyList()) {
             val gameIds = gameId2WSSessions[gameId] ?: continue
             gameIds.remove(session)
@@ -144,9 +235,7 @@ data class BasicAuthInfo(
     val password: String,
 )
 
-/**
- * Checks if a [String] is a valid UUID
- */
+/* Checks if a [String] is a valid UUID */
 @OptIn(ExperimentalUuidApi::class)
 private fun String.toUuidOrNull() = try {
     Uuid.parse(this)
@@ -249,7 +338,9 @@ private class UncivServerRunner : CliktCommand() {
         echo("Starting UncivServer for ${file.absolutePath} on http://localhost$portStr")
         if (!file.exists()) file.mkdirs()
         val server = embeddedServer(Netty, port = serverPort) {
-            install(ContentNegotiation) { json() }
+            install(ContentNegotiation) {
+                json(Json { ignoreUnknownKeys = true })
+            }
 
             install(Authentication) {
                 basic {
@@ -275,6 +366,7 @@ private class UncivServerRunner : CliktCommand() {
                     // DO NOT OMIT
                     // if omitted the "type" field will be missing from all outgoing messages
                     classDiscriminatorMode = ClassDiscriminatorMode.ALL_JSON_OBJECTS
+                    ignoreUnknownKeys = true  // server relays GameActionPacket without parsing 'action'
                 })
             }
 
@@ -375,15 +467,20 @@ private class UncivServerRunner : CliktCommand() {
 
                     if (chatV1Enabled) webSocket("/chat") {
                         val authInfo = call.principal<BasicAuthInfo>()
-                        if (authInfo == null) {
-                            sendSerialized(Response.Error("No authentication info found!"))
-                            return@webSocket close()
-                        }
 
-                        val serverPassword = authMap[authInfo.userId]
-                        if (serverPassword == null || serverPassword != authInfo.password) {
-                            sendSerialized(Response.Error("Authentication failed!"))
-                            return@webSocket close()
+                        // If auth is disabled, skip all checks
+                        if (authV1Enabled) {
+                            if (authInfo == null) {
+                                sendSerialized(Response.Error("No authentication info found!"))
+                                return@webSocket close()
+                            }
+
+                            val serverPassword = authMap[authInfo.userId]
+                            // No password set yet → allow; password mismatch → reject
+                            if (serverPassword != null && serverPassword != authInfo.password) {
+                                sendSerialized(Response.Error("Authentication failed!"))
+                                return@webSocket close()
+                            }
                         }
 
                         try {
@@ -425,6 +522,63 @@ private class UncivServerRunner : CliktCommand() {
                                     }
 
                                     is Message.Leave -> wsSessionManager.unsubscribe(this, message.gameIds)
+
+                                    // Simultaneous mode: route game actions to host or broadcast
+                                    is Message.GameActionRelay -> {
+                                        val gameId = message.packet.gameId.toUuidOrNull()
+                                        if (gameId == null) {
+                                            sendSerialized(Response.Error("Invalid gameId in GameAction!"))
+                                            continue
+                                        }
+
+                                        if (message.packet.validated) {
+                                            // Host-sent action — broadcast to all non-hosts
+                                            wsSessionManager.hostByGame[gameId] = this
+                                            wsSessionManager.publishToNonHosts(gameId, Response.GameActionRelay(message.packet))
+                                        } else {
+                                            // Non-host action — relay to host for validation
+                                            wsSessionManager.publishToHost(gameId, Response.GameActionRelay(message.packet))
+                                        }
+                                    }
+
+                                    is Message.SetHost -> {
+                                        val gameId = message.gameId.toUuidOrNull()
+                                        if (gameId == null) {
+                                            sendSerialized(Response.Error("Invalid gameId in SetHost!"))
+                                            continue
+                                        }
+                                        wsSessionManager.hostByGame[gameId] = this
+                                        // Notify all subscribers of new host
+                                        wsSessionManager.publish(gameId, Response.HostSet(
+                                            gameId = message.gameId,
+                                            hostUserId = "",
+                                        ))
+                                    }
+
+                                    is Message.EndTurn -> {
+                                        val gameId = message.gameId.toUuidOrNull()
+                                        if (gameId == null) {
+                                            sendSerialized(Response.Error("Invalid gameId in EndTurn!"))
+                                            continue
+                                        }
+                                        wsSessionManager.publish(gameId, Response.PlayerEndedTurn(
+                                            gameId = message.gameId,
+                                            civName = message.civName,
+                                            choicesJson = message.choicesJson,
+                                        ))
+                                    }
+
+                                    is Message.TurnAdvance -> {
+                                        val gameId = message.gameId.toUuidOrNull()
+                                        if (gameId == null) {
+                                            sendSerialized(Response.Error("Invalid gameId in TurnAdvance!"))
+                                            continue
+                                        }
+                                        wsSessionManager.publish(gameId, Response.TurnAdvanced(
+                                            gameId = message.gameId,
+                                            newTurns = message.newTurns,
+                                        ))
+                                    }
                                 }
                                 yield()
                             }
