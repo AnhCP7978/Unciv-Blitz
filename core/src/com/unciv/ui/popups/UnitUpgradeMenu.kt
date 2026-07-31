@@ -107,8 +107,7 @@ class UnitUpgradeMenu(
 
     private fun doUpgrade() {
         SoundPlayer.play(unitAction.uncivSound)
-        if (!SimultaneousModeInterceptor.interceptUpgradeUnitAction(unit.id, unitToUpgradeTo.name))
-            unitAction.action!!()
+        unitAction.action!!()
     }
 
     private fun doAllUpgrade() {
@@ -117,8 +116,7 @@ class UnitUpgradeMenu(
             val otherAction = UnitActionsUpgrade.getUpgradeActions(unit)
                 .firstOrNull{ (it as UpgradeUnitAction).unitToUpgradeTo == unitToUpgradeTo &&
                     it.action != null }
-            // The if case is single-player / non-intercepted. In MP the interceptor handles it.
-            if (otherAction != null && !SimultaneousModeInterceptor.interceptUpgradeUnitAction(unit.id, unitToUpgradeTo.name))
+            if (otherAction != null)
                 otherAction.action!!.invoke()
         }
     }

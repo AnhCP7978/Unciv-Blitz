@@ -62,13 +62,9 @@ internal fun GameAction.TradeData.toTrade(): Trade {
 
 /**
  * Orchestrates the 2-phase broadcast protocol for simultaneous multiplayer:
- *
- * **Non-host** players send actions via WebSocket Ã¢â€ â€™ server relays to all
- * (including host) Ã¢â€ â€™ host validates Ã¢â€ â€™ host broadcasts acceptance/rejection.
- *
- * **Host** listens for all "end turn" signals Ã¢â€ â€™ runs [SimultaneousTurnProcessor.processAdvance]
- * Ã¢â€ â€™ uploads game file Ã¢â€ â€™ broadcasts [Response.TurnAdvanced] so everyone downloads.
- */
+ * Non-host: Send action to server -> relay ONLY to host -> if valid, broadcast to all
+ * Host: Apply locally, then broadcast valid packet to all
+*/
 class ActionBroadcastManager(private val worldScreen: WorldScreen) {
     private val gameId get() = worldScreen.gameInfo.gameId
 
@@ -91,7 +87,6 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
     // ──────────────────────────────────────
     //  Send packet when [SimultaneousModeInterceptor] intercepted an action
     // ──────────────────────────────────────
-
     internal fun sendGameAction(action: GameAction) {
         val validated = isHost()
         if (validated) {
@@ -484,7 +479,12 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
             val tile = unit.getTile()
             val pillageAction = UnitActionsPillage.getPillageAction(unit, tile) ?: return
             pillageAction.action?.invoke() ?: return
-        } else {
+        }
+        else if (action.actionType == UnitActionType.DisbandUnit) {
+            unit.disband()
+            unit.civ.updateStatsForNextTurn() // less upkeep!
+        }
+        else {
             if (!UnitActions.invokeUnitAction(unit, action.actionType)) {
                 debug("Host rejected action: unit ${action.unitId} cannot do ${action.actionType.value}")
                 return
@@ -501,7 +501,11 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
             val tile = unit.getTile()
             val pillageAction = UnitActionsPillage.getPillageAction(unit, tile)!!
             pillageAction.action!!.invoke()
-        } else {
+        }
+        else if (action.actionType == UnitActionType.DisbandUnit) {
+            unit.disband() // No need for "unit.civ.updateStatsForNextTurn()" here, next turn is calculated by host anyway
+        }
+        else {
             UnitActions.invokeUnitAction(unit, action.actionType)
         }
     }
@@ -893,41 +897,34 @@ class ActionBroadcastManager(private val worldScreen: WorldScreen) {
     }
 
     // ──────────────────────────────────────
-    //  Spawn Unit (great person picker, etc.)
+    //  Spawn Unit (great person picker, etc.) - GreatPersonPickerScreen.kt
     // ──────────────────────────────────────
+
+    /* IF great person spawn from:
+    + Host -> host already reduce freeGreatPeople locally, broadcast the state to others (next turn everyone would load correct stat)
+    + Non-host -> host haven't reduce freeGreatPeople for that player -> decrease it for correct stat next turn
+    */
     private fun hostValidateSpawnUnit(envelope: GameActionPacket) {
         val action = envelope.action as? GameAction.SpawnUnitAction ?: return
         val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
-        if (civ.cities.isEmpty()) return
-        val baseUnit = worldScreen.gameInfo.ruleset.units[action.unitName] ?: return
-        civ.getEquivalentUnit(baseUnit)
-        applyRemoteSpawnUnit(action)
-        // Apply great person counter decrements on authoritative host state
-        // Non-host already does this locally, so the validated echo must not double-decrement
-        if (action.freeGreatPeopleDecrement > 0)
-            civ.greatPeople.freeGreatPeople -= action.freeGreatPeopleDecrement
-        if (action.mayaLimitedFreeGPDecrement > 0)
-            civ.greatPeople.mayaLimitedFreeGP -= action.mayaLimitedFreeGPDecrement
-        for (unitName in action.longCountGPPoolRemoval)
-            civ.greatPeople.longCountGPPool.remove(unitName)
+        if (civ.isDefeated()) return
+
+        if (civ.units.addUnit(action.unitName, civ.getCapital()) == null) return
+        // freeGreatPeople count have to be reduced in host-side too...
+        civ.greatPeople.freeGreatPeople--
+        if (civ.greatPeople.mayaLimitedFreeGP > 0) {
+            civ.greatPeople.mayaLimitedFreeGP--
+            civ.greatPeople.longCountGPPool.remove(action.unitName)
+        }
         val validatedEnvelope = envelope.copy(validated = true)
         ChatWebSocket.requestMessageSend(
             com.unciv.logic.multiplayer.chat.Message.GameActionRelay(validatedEnvelope)
         )
     }
     private fun applyRemoteSpawnUnit(action: GameAction.SpawnUnitAction) {
-        val civ = worldScreen.gameInfo.civilizations.firstOrNull { it.civName == action.civName } ?: return
-        if (civ.cities.isEmpty()) return
-        val city = action.cityId?.let { id -> civ.cities.firstOrNull { it.id == id } }
-        civ.units.addUnit(action.unitName, city ?: civ.getCapital() ?: civ.cities.firstOrNull())
-        // Apply great person counter decrements ─ these were incremented on both host and non-host
-        // by unique triggers from policy adoption / wonder completion, so both must decrement.
-        if (action.freeGreatPeopleDecrement > 0)
-            civ.greatPeople.freeGreatPeople -= action.freeGreatPeopleDecrement
-        if (action.mayaLimitedFreeGPDecrement > 0)
-            civ.greatPeople.mayaLimitedFreeGP -= action.mayaLimitedFreeGPDecrement
-        for (unitName in action.longCountGPPoolRemoval)
-            civ.greatPeople.longCountGPPool.remove(unitName)
+        val civ = worldScreen.gameInfo.civilizations.first { it.civName == action.civName }
+        // freeGreatPeople count is already decreased locally, so we don't double-apply it here
+        civ.units.addUnit(action.unitName, civ.getCapital())
     }
 
     // ──────────────────────────────────────

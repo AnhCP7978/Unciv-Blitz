@@ -82,16 +82,14 @@ class ReligiousBeliefsPickerScreen (
         ) {
             val beliefNames = beliefsToChoose.map { it.belief!!.name }
             if (civInfo.religionManager.religionState == ReligionState.FoundingReligion) {
-                if (SimultaneousModeInterceptor.interceptCompleteFoundReligion(civInfo.civName, displayName!!, religionName!!, beliefNames)) {
-                    UncivGame.Current.popScreen()
+                if (SimultaneousModeInterceptor.interceptCompleteFoundReligion(civInfo.civName, displayName!!, religionName!!, beliefNames))
                     return@setOKAction
-                }
+
                 civInfo.religionManager.foundReligion(displayName!!, religionName!!)
             }
-            else if (SimultaneousModeInterceptor.interceptCompleteFoundReligion(civInfo.civName, displayName!!, religionName!!, beliefNames)) {
-                UncivGame.Current.popScreen()
+            else if (SimultaneousModeInterceptor.interceptCompleteEnhanceReligion(civInfo.civName, beliefNames))
                 return@setOKAction
-            }
+
             chooseBeliefs(beliefsToChoose.map { it.belief!! }, usingFreeBeliefs())
         }
     }

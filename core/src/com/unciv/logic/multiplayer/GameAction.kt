@@ -49,20 +49,21 @@ sealed interface GameAction {
     @SerialName("upgradeUnit")
     data class UpgradeUnitAction(
         val unitId: Int,
-        val unitToUpgradeTo: String
+        val unitToUpgradeTo: String // BaseUnit.name
     ) : GameAction
+
     @Serializable
     @SerialName("transformUnit")
     data class TransformUnitAction(
         val unitId: Int,
-        val unitToTransformTo: String,
+        val unitToTransformTo: String // BaseUnit.name
     ) : GameAction
 
     @Serializable
     @SerialName("triggerUnique")
     data class TriggerUniqueAction(
         val unitId: Int,
-        val uniqueText: String,
+        val uniqueText: String
     ) : GameAction
 
     /* Promote */
@@ -97,7 +98,7 @@ sealed interface GameAction {
     data class BuyTileAction(
         val cityId: String,
         val tileX: Int,
-        val tileY: Int,
+        val tileY: Int
     ) : GameAction
 
     @Serializable
@@ -105,7 +106,7 @@ sealed interface GameAction {
     data class PurchaseAction(
         val constructionName: String,
         val cityId: String,
-        val stat: String, // "Gold" or "Faith" — the stat used to pay. Since each construction actually store its cost, could we remove this?
+        val stat: String // "Gold" or "Faith" — the stat used to pay. Since each construction actually store its cost, could we remove this?
     ) : GameAction
 
     // ═══════════════════════════════════════════
@@ -115,22 +116,22 @@ sealed interface GameAction {
     @SerialName("declareWar")
     data class DeclareWarAction(
         val civName: String,
-        val otherCivName: String,
+        val otherCivName: String
     ) : GameAction
 
     @Serializable
     @SerialName("captureCity")
     data class CaptureCityAction(
         val cityId: String,
-        val civName: String, // conquerer civName
-        val mode: String, // "Puppet", "Annex", "Raze", "Liberate", (& "Destroy" for one-city challenge mode)
+        val civName: String,    // conquerer civName
+        val mode: String        // "Puppet", "Annex", "Raze", "Liberate", (& "Destroy" for one-city challenge mode)
     ) : GameAction
 
     @Serializable
     @SerialName("annexCity") // Sub-action for CaptureCityAction... could merge in the future?
     data class AnnexCityAction(
         val cityId: String,
-        val civName: String,
+        val civName: String
     ) : GameAction
 
     // ═══════════════════════════════════════════
@@ -139,7 +140,7 @@ sealed interface GameAction {
     @Serializable
     @SerialName("endTurn")
     data class EndTurnAction(
-        val civName: String,
+        val civName: String
     ) : GameAction
 
     @Serializable
@@ -147,39 +148,35 @@ sealed interface GameAction {
     data class TurnAdvanced(
         val newTurns: Int,
         val gameId: String,
-        val civName: String = "",
+        val civName: String = ""
     ) : GameAction
 
     @Serializable
     @SerialName("adoptPolicy")
     data class AdoptPolicyAction(
         val policyName: String,
-        val civName: String,
+        val civName: String
     ) : GameAction
 
     @Serializable
     @SerialName("chooseFreeTech")
     data class ChooseFreeTechAction(
         val techName: String,
-        val civName: String,
+        val civName: String
     ) : GameAction
 
     @Serializable
     @SerialName("foundPantheon")
     data class FoundPantheonAction(
         val beliefName: String,
-        val civName: String,
+        val civName: String
     ) : GameAction
 
     @Serializable
     @SerialName("spawnUnit")
     data class SpawnUnitAction(
         val unitName: String,
-        val cityId: String?,
-        val civName: String,
-        val freeGreatPeopleDecrement: Int = 0,
-        val mayaLimitedFreeGPDecrement: Int = 0,
-        val longCountGPPoolRemoval: List<String> = emptyList(),
+        val civName: String
     ) : GameAction
 
     // ═══════════════════════════════════════════
@@ -193,7 +190,7 @@ sealed interface GameAction {
         val civName: String,
         val displayName: String,
         val religionName: String,
-        val beliefNames: List<String>,
+        val beliefNames: List<String>
     ) : GameAction
 
     /* This one fired after enhanced religion */
@@ -201,7 +198,7 @@ sealed interface GameAction {
     @SerialName("completeEnhanceReligion")
     data class CompleteEnhanceReligionAction(
         val civName: String,
-        val beliefNames: List<String>,
+        val beliefNames: List<String>
     ) : GameAction
 
     // ═══════════════════════════════════════════
@@ -215,7 +212,7 @@ sealed interface GameAction {
     data class SendTradeRequestAction(
         val requestingCiv: String,
         val targetCiv: String,
-        val trade: TradeData,
+        val trade: TradeData
     ) : GameAction {
         val civName: String get() = requestingCiv
     }
@@ -225,7 +222,7 @@ sealed interface GameAction {
     data class AcceptTradeAction(
         val acceptingCiv: String,
         val requestingCiv: String,
-        val trade: TradeData,
+        val trade: TradeData
     ) : GameAction {
         val civName: String get() = acceptingCiv
     }
@@ -248,7 +245,7 @@ sealed interface GameAction {
     data class GoldGiftAction(
         val cityStateName: String,
         val giftAmount: Int,
-        val civName: String,
+        val civName: String
     ) : GameAction
 
     @Serializable
@@ -256,7 +253,7 @@ sealed interface GameAction {
     data class SetProtectionAction(
         val cityStateName: String,
         val protect: Boolean,
-        val civName: String,
+        val civName: String
     ) : GameAction
 
     @Serializable
@@ -266,14 +263,14 @@ sealed interface GameAction {
         val tileX: Int,
         val tileY: Int,
         val improvementName: String,
-        val civName: String,
+        val civName: String
     ) : GameAction
 
     @Serializable
     @SerialName("diplomaticMarriage")
     data class DiplomaticMarriageAction(
         val cityStateName: String,
-        val civName: String,
+        val civName: String
     ) : GameAction
 
     // ═══════════════════════════════════════════
@@ -285,13 +282,13 @@ sealed interface GameAction {
         val name: String,
         val type: String,
         val amount: Int = 1,
-        val duration: Int,
+        val duration: Int
     )
 
     @Serializable
     data class TradeData(
         val theirOffers: List<TradeOfferData> = emptyList(),
-        val ourOffers: List<TradeOfferData> = emptyList(),
+        val ourOffers: List<TradeOfferData> = emptyList()
     )
 }
 

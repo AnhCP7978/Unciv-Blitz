@@ -47,19 +47,17 @@ class GreatPersonPickerScreen(val worldScreen: WorldScreen, val civInfo: Civiliz
     }
 
     private fun confirmAction(useMayaLongCount: Boolean) {
-        if (!SimultaneousModeInterceptor.interceptSpawnUnit(
-            theChosenOne!!.name, civInfo.getCapital()?.id, civInfo.civName,
-            freeGreatPeopleDecrement = 1,
-            mayaLimitedFreeGPDecrement = if (useMayaLongCount) 1 else 0,
-            longCountGPPoolRemoval = if (useMayaLongCount) listOf(theChosenOne!!.name) else emptyList(),
-        )) {
-            civInfo.units.addUnit(theChosenOne!!, civInfo.getCapital())
-            civInfo.greatPeople.freeGreatPeople--
-            if (useMayaLongCount) {
-                civInfo.greatPeople.mayaLimitedFreeGP--
-                civInfo.greatPeople.longCountGPPool.remove(theChosenOne!!.name)
-            }
+        // For simultaneous, you intercept -> popScreen -> immediately open great person picker screen since freeGreatPeople not decrease
+        // Hence, we reduce this locally, and host only validate the spawn action...
+        civInfo.greatPeople.freeGreatPeople--
+        if (useMayaLongCount) {
+            civInfo.greatPeople.mayaLimitedFreeGP--
+            civInfo.greatPeople.longCountGPPool.remove(theChosenOne!!.name)
         }
+
+        if (!SimultaneousModeInterceptor.interceptSpawnUnit(theChosenOne!!.name, civInfo.civName))
+            civInfo.units.addUnit(theChosenOne!!, civInfo.getCapital())
+
         UncivGame.Current.popScreen()
     }
 }

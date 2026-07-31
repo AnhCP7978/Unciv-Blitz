@@ -63,11 +63,12 @@ object SimultaneousModeInterceptor {
         val broadcastManager = getBroadcastManager() ?: return false
 
         when (action.type) {
+            // Pure UI actions — must never be intercepted
+            UnitActionType.ShowAdditionalActions, UnitActionType.HideAdditionalActions -> return false
             // These open picker screens — intercepted at the picker's finalize instead
             UnitActionType.ConstructImprovement, UnitActionType.Promote -> return false
-
-            // Upgrade has its own dedicated interceptor called from UnitUpgradeMenu
-            UnitActionType.Upgrade -> return false
+            // Should require confirmation, use interceptDisbandAction()
+            UnitActionType.DisbandUnit -> return false
 
             // Dedicated GameAction types (need extra params from the action)
             UnitActionType.CreateImprovement -> {
@@ -77,6 +78,10 @@ object SimultaneousModeInterceptor {
             UnitActionType.TriggerUnique -> {
                 val uniqueText = action.associatedUnique?.text ?: return false
                 broadcastManager.sendGameAction(GameAction.TriggerUniqueAction(unitId, uniqueText))
+            }
+            UnitActionType.Upgrade -> {
+                val unitToUpgradeTo = (action as UpgradeUnitAction).unitToUpgradeTo.name
+                broadcastManager.sendGameAction(GameAction.UpgradeUnitAction(unitId, unitToUpgradeTo))
             }
             UnitActionType.Transform -> {
                 // Transform actions carry the target unit name in the title via "[unitName]" pattern
@@ -93,13 +98,7 @@ object SimultaneousModeInterceptor {
         return true
     }
 
-    fun interceptUpgradeUnitAction(unitId: Int, unitToUpgradeTo: String): Boolean {
-        val broadcastManager = getBroadcastManager() ?: return false
-        broadcastManager.sendGameAction(GameAction.UpgradeUnitAction(unitId, unitToUpgradeTo))
-        return true
-    }
-
-    fun interceptDisbandUnitAction(unitId: Int): Boolean {
+    fun interceptDisbandAction(unitId: Int): Boolean {
         val broadcastManager = getBroadcastManager() ?: return false
         broadcastManager.sendGameAction(GameAction.InvokeUnitAction(unitId, UnitActionType.DisbandUnit))
         return true
@@ -174,19 +173,9 @@ object SimultaneousModeInterceptor {
     }
 
     // Intercept a spawn unit action (great person picker)
-    fun interceptSpawnUnit(
-        unitName: String,
-        cityId: String?,
-        civName: String,
-        freeGreatPeopleDecrement: Int = 0,
-        mayaLimitedFreeGPDecrement: Int = 0,
-        longCountGPPoolRemoval: List<String> = emptyList(),
-    ): Boolean {
+    fun interceptSpawnUnit(unitName: String, civName: String): Boolean {
         val broadcastManager = getBroadcastManager() ?: return false
-        broadcastManager.sendGameAction(
-            GameAction.SpawnUnitAction(unitName, cityId, civName,
-                freeGreatPeopleDecrement, mayaLimitedFreeGPDecrement, longCountGPPoolRemoval)
-        )
+        broadcastManager.sendGameAction(GameAction.SpawnUnitAction(unitName, civName))
         return true
     }
 
